@@ -770,7 +770,7 @@ leitura (`dbctl status`), nunca para criar, dropar ou reiniciar serviços.
 | # | Ação | Resultado esperado |
 |---|---|---|
 | V1 | `dbctl status` de uma subpasta profunda do sandbox | Encontra a raiz pelo `.dbctl.toml` |
-| V2 | `dbctl status` a partir de `~` | Falha com `ProjectNotFoundError`, exit 2, mensagem ensinando a injetar |
+| V2 | `dbctl status` a partir de `~` | Fora de repo git → `GitError`, exit 4 (ver C8). Dentro de um repo git sem `.dbctl.toml` → `ProjectNotFoundError`, exit 2, mensagem ensinando a injetar |
 | V3 | Remover uma chave obrigatória do `.dbctl.toml` | Exit 3, mensagem nomeando a chave e o arquivo |
 | V4 | `strategy.kind = "banana"` | Exit 3, mensagem listando os valores válidos |
 | V5 | `DBCTL_POSTGRES_PASSWORD=x dbctl status` com senha removida do arquivo | Funciona (env var tem precedência) |
