@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dbctl.commands import target_db
+from dbctl.commands import dry, target_db
 from dbctl.config import Config
 from dbctl.errors import DatabaseError
 from dbctl.filestore import copy as filestore_copy
@@ -25,13 +25,13 @@ def run(
     use: bool = False,
 ) -> dict:
     branch, db = target_db(cfg)
-    if database_exists(cfg, db):
+    if not dry() and database_exists(cfg, db):
         raise DatabaseError(
             f"database '{db}' already exists - use 'dbctl reset' to recreate it "
             "from the template."
         )
     source = template or cfg.postgres.template_db
-    if not database_exists(cfg, source):
+    if not dry() and not database_exists(cfg, source):
         raise DatabaseError(
             f"template database '{source}' does not exist - create it first "
             "(e.g. 'docker compose run --rm --no-deps {svc} odoo -d {source} -i base --stop-after-init')"

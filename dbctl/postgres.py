@@ -7,14 +7,25 @@ not the host command line.
 
 from __future__ import annotations
 
+import os
+
 from dbctl.config import Config
 from dbctl.docker import exec_in
 from dbctl.errors import DatabaseError
 
 
-def _q(name: str) -> str:
-    """Quote an identifier for embedding in SQL (always double quotes)."""
+def _is_dry_run() -> bool:
+    return os.environ.get("DBCTL_DRY_RUN") == "1"
+
+
+def _ident(name: str) -> str:
+    """Quote a name as an SQL identifier (CREATE/DROP DATABASE ...)."""
     return '"' + name.replace('"', '""') + '"'
+
+
+def _lit(name: str) -> str:
+    """Quote a name as an SQL string literal (datname = ...)."""
+    return "'" + name.replace("'", "''") + "'"
 
 
 def _psql(cfg: Config, sql: str, *, capture: bool = True) -> str:
@@ -28,7 +39,11 @@ def _psql(cfg: Config, sql: str, *, capture: bool = True) -> str:
 
 
 def database_exists(cfg: Config, name: str) -> bool:
-    out = _psql(cfg, f"SELECT 1 FROM pg_database WHERE datname = {_q(name)}")
+    if _is_dry_run():
+        # In dry-run every command prints and returns nothing; assume the
+        # database exists so the flow can walk through all the steps.
+        return True
+    out = _psql(cfg, f"SELECT 1 FROM pg_database WHERE datname = {_lit(name)}")
     return out.strip() == "1"
 
 
@@ -42,7 +57,7 @@ def list_databases(cfg: Config, prefix: str) -> list[tuple[str, str]]:
         cfg,
         "SELECT datname, pg_size_pretty(pg_database_size(datname)) "
         "FROM pg_database WHERE datname LIKE "
-        f"'{pattern}' ESCAPE '\\' ORDER BY datname",
+        f"{_lit(pattern)} ESCAPE '\\' ORDER BY datname",
     )
     rows: list[tuple[str, str]] = []
     for line in out.splitlines():
@@ -56,18 +71,18 @@ def terminate_connections(cfg: Config, name: str) -> None:
     _psql(
         cfg,
         "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
-        f"WHERE datname = {_q(name)} AND pid <> pg_backend_pid()",
+        f"WHERE datname = {_lit(name)} AND pid <> pg_backend_pid()",
     )
 
 
 def clone_database(cfg: Config, source: str, target: str) -> None:
-    if database_exists(cfg, target):
+    if not _is_dry_run() and database_exists(cfg, target):
         raise DatabaseError(
             f"database '{target}' already exists - use 'dbctl reset' to recreate it "
             "from the template."
         )
     try:
-        _psql(cfg, f"CREATE DATABASE {_q(target)} TEMPLATE {_q(source)}")
+        _psql(cfg, f"CREATE DATABASE {_ident(target)} TEMPLATE {_ident(source)}")
     except Exception as exc:
         raise DatabaseError(
             f"failed to clone '{source}' -> '{target}': {exc}"
@@ -87,4 +102,4 @@ def drop_database(cfg: Config, name: str) -> None:
             f"'{prefix}'. dbctl only manages databases it created."
         )
     terminate_connections(cfg, name)
-    _psql(cfg, f'DROP DATABASE IF EXISTS {_q(name)}')
+    _psql(cfg, f'DROP DATABASE IF EXISTS {_ident(name)}')

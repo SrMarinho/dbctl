@@ -6,7 +6,7 @@ by create with --use, so the fresh database ends up being served.
 
 from __future__ import annotations
 
-from dbctl.commands import create, target_db
+from dbctl.commands import create, dry, target_db
 from dbctl.config import Config
 from dbctl.errors import UserAbort
 from dbctl.filestore import remove as filestore_remove
@@ -25,7 +25,7 @@ def run(cfg: Config, *, yes: bool = False, ask=None) -> dict:
         ):
             raise UserAbort("aborted by user")
 
-    if database_exists(cfg, db):
+    if database_exists(cfg, db) or dry():
         strategy = get_strategy(cfg)
         if strategy.current_database() == db:
             strategy.stop()

@@ -1,7 +1,7 @@
 """Project discovery and git helpers.
 
-Git is executed through docker.run (the single subprocess wrapper), so the
-"subprocess only in docker.py" rule stays intact.
+Git is executed through docker.run (the single process-spawning wrapper),
+so the "process calls only live in docker.py" rule stays intact.
 """
 
 from __future__ import annotations

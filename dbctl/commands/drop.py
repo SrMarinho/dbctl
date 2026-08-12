@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dbctl.commands import target_db
+from dbctl.commands import dry, target_db
 from dbctl.config import Config
 from dbctl.errors import DatabaseError, UserAbort
 from dbctl.filestore import remove as filestore_remove
@@ -39,7 +39,7 @@ def run(
         strategy.stop()
         strategy.unuse()  # the served db no longer exists; back to base config
 
-    existed = database_exists(cfg, db)
+    existed = database_exists(cfg, db) or dry()
     if existed:
         drop_database(cfg, db)
     filestore_remove(cfg, db)
