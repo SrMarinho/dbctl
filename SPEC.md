@@ -41,7 +41,7 @@ container, porta e filestore por worktree. **Não implementar worktrees.**
 | Termo | Significado |
 |---|---|
 | **tool** | O `dbctl` em si, em `~/projects/dbctl`. Agnóstico, não conhece nenhum projeto. |
-| **projeto injetado** | Qualquer projeto Odoo que tenha um `.dbctl.toml` na raiz. |
+| **projeto injetado** | Qualquer projeto Odoo (repositório git) que tenha um `.dbctl.toml` em algum lugar da árvore. |
 | **template DB** | Banco de origem do clone (ex.: `greencompras_local`). Nunca é modificado. |
 | **branch DB** | Banco derivado, pertencente a uma branch. Sempre começa com o `db_prefix`. |
 | **filestore** | Diretório de anexos do Odoo, um por banco, dentro do container (`<data_dir>/filestore/<db>`). |
@@ -68,11 +68,12 @@ de banco é feita via `docker exec` no container do Postgres. Isso é requisito 
 
 Para um projeto Odoo ser gerenciável pelo `dbctl`, ele precisa:
 
-1. Ser um repositório git (o nome da branch é a chave de tudo).
+1. Ser um repositório git (o nome da branch é a chave de tudo — e agora também a base de descoberta
+   do config, ver 5.0).
 2. Rodar Postgres e Odoo em containers Docker, com nomes de container estáveis.
 3. Ter um `docker-compose.yml` com um serviço de Odoo identificável.
 4. Ter um banco template já existente e funcional.
-5. Ter um `.dbctl.toml` na raiz.
+5. Ter um `.dbctl.toml` em algum lugar do repositório — não precisa ser a raiz (ver 5.0).
 
 ### 3.3 Ambiente de referência (projeto `credsus`) — fatos verificados
 
@@ -162,10 +163,17 @@ casca fina: faz parsing de argumentos e formata saída, **nunca contém regra de
       list_dbs.py
       drop.py
       reset.py
+      hook.py              # instala/remove o post-checkout
 ```
 
 ### 4.3 Estrutura no projeto injetado
 
+O `.dbctl.toml` pode morar na raiz do repositório ou em qualquer subpasta (inclusive uma pasta já
+ignorada pelo git — ver 5.0 para a ordem de descoberta). Em qualquer um dos dois casos, os caminhos
+relativos **dentro** do config (`seeds.path`, `odoo.compose_file`, `strategy.override_file`) são
+resolvidos a partir da **raiz do repositório git**, nunca a partir da pasta onde o arquivo está.
+
+**Na raiz** (arranjo mais simples):
 ```
 <projeto>/
   .dbctl.toml                    # config (gitignored — contém credenciais locais)
@@ -175,12 +183,50 @@ casca fina: faz parsing de argumentos e formata saída, **nunca contém regra de
       <slug>.py                  # roda só na branch correspondente
 ```
 
-No `credsus`, `seeds_path = "temp/seeds"` porque `/temp/` já está no `.gitignore` — não exige mexer em
-arquivo versionado. Em outro projeto pode ser qualquer pasta.
+**Em pasta já ignorada** (evita tocar no `.gitignore` versionado — arranjo do `credsus`):
+```
+<projeto>/
+  temp/                          # já está em /temp/ no .gitignore
+    .dbctl.toml                  # config
+    seeds/
+      base.py
+      branches/
+        <slug>.py
+```
+No `credsus`, `seeds_path = "temp/seeds"` e o `.dbctl.toml` também vive em `temp/`, porque `/temp/`
+já está no `.gitignore` — não exige mexer em arquivo versionado. Em outro projeto pode ser qualquer
+pasta.
 
 ---
 
 ## 5. Especificação de configuração
+
+### 5.0 Localização do arquivo `.dbctl.toml`
+
+O `.dbctl.toml` **não** precisa estar na raiz do projeto. A raiz do projeto (`project_root`) e o
+arquivo de config (`path`) são dois conceitos distintos:
+
+- **`project_root`** = topo do repositório git, via `git rev-parse --show-toplevel`. É a base de todo
+  caminho relativo do config (`seeds.path`, `odoo.compose_file`, `strategy.override_file`) e a cwd do
+  `docker compose`. Fora de um repo git → `GitError` (exit 4).
+- **`path`** = o arquivo `.dbctl.toml` em si, em qualquer lugar dentro do repositório.
+
+Ordem de descoberta (a primeira que resolver vence):
+
+1. **`--config PATH`** (flag global) ou **`DBCTL_CONFIG`** (env var). Explícito, ignora toda busca;
+   caminho inexistente → `ConfigError`.
+2. **Subindo da cwd** até o topo do repositório, procurando `.dbctl.toml` — comportamento de sempre,
+   preservado como caso comum (arquivo na raiz ou numa pasta acima da cwd).
+3. **Descendo do topo do repositório**, com profundidade máxima 3 e poda de `.git`, `.venv`,
+   `node_modules`, `__pycache__` e diretórios começando com ponto.
+   - Nenhum `.dbctl.toml` encontrado → `ProjectNotFoundError` (exit 2), mencionando `--config` /
+     `DBCTL_CONFIG` como alternativas.
+   - **Mais de um encontrado → `ConfigError` (exit 3)** listando todos os caminhos e pedindo para
+     escolher com `--config`. Ambiguidade nunca é resolvida em silêncio — o banco que o Odoo serve
+     depende de qual arquivo é lido.
+
+A flag `-p/--project` continua existindo e passa a significar "raiz do projeto" (para quando a
+descoberta automática do repo git não é suficiente); pode ser combinada com `--config`.
 
 ### 5.1 Arquivo `.dbctl.toml`
 
@@ -207,6 +253,10 @@ mount = "/mnt/dbctl-seeds"               # opcional, default "/mnt/dbctl-seeds"
 kind          = "compose-override"       # "compose-override" | "custom"
 override_file = "docker-compose.override.yaml"   # só para compose-override
 
+[hooks]
+enabled = true                           # opcional, default true; false desliga o post-checkout
+                                          # sem desinstalá-lo (ver 7.1, `dbctl hook`)
+
 # Escape hatch — só quando kind = "custom".
 # Placeholders disponíveis: {db}, {modules}, {project_root}
 # [strategy.commands]
@@ -229,14 +279,23 @@ problemática e o caminho do arquivo:
    ter seeds).
 6. `db_prefix` vazio ou que não case com `^[a-z][a-z0-9_]*$` → erro (o prefixo é a proteção contra
    dropar banco alheio).
-7. `seeds.path` é resolvido para **caminho absoluto** no carregamento (base: a raiz do projeto).
-   É esse caminho absoluto que vai no `-v` do `compose run` do seed — `compose run -v` exige caminho
-   absoluto do host.
+7. `seeds.path` é resolvido para **caminho absoluto** no carregamento (base: a raiz do **repositório
+   git**, não a pasta onde o `.dbctl.toml` está — ver 5.0). É esse caminho absoluto que vai no `-v` do
+   `compose run` do seed — `compose run -v` exige caminho absoluto do host.
+8. `hooks.enabled` aceita apenas os literais booleanos reconhecidos (arquivo: `true`/`false` do TOML;
+   env var: `1/true/yes/on` e `0/false/no/off`, case-insensitive). Valor não reconhecido → erro
+   apontando a chave. Bloco `[hooks]` ausente é equivalente a `enabled = true`.
 
 ### 5.3 Overrides por variável de ambiente
 
 Todas as chaves aceitam override por env var no padrão `DBCTL_<SEÇÃO>_<CHAVE>` em maiúsculas
-(ex.: `DBCTL_POSTGRES_PASSWORD`, `DBCTL_ODOO_CONTAINER`). Precedência: **env var > arquivo > default**.
+(ex.: `DBCTL_POSTGRES_PASSWORD`, `DBCTL_ODOO_CONTAINER`, `DBCTL_HOOKS_ENABLED`). Precedência:
+**env var > arquivo > default**.
+
+Duas variáveis adicionais, fora do padrão `DBCTL_<SEÇÃO>_<CHAVE>` por não pertencerem a nenhuma seção
+do TOML — controlam a própria descoberta do arquivo (ver 5.0):
+- `DBCTL_CONFIG` — caminho explícito do `.dbctl.toml`, equivalente à flag `--config`.
+- `DBCTL_DRY_RUN` — já documentado em `docker.py` (seção 6).
 
 ---
 
@@ -250,7 +309,7 @@ Exceções tipadas, todas herdando de `DbctlError`, cada uma com um `exit_code`:
 
 | Exceção | Exit code | Quando |
 |---|---|---|
-| `ProjectNotFoundError` | 2 | Não achou `.dbctl.toml` subindo da cwd |
+| `ProjectNotFoundError` | 2 | Não achou `.dbctl.toml` na busca (subindo da cwd nem descendo do repo) |
 | `ConfigError` | 3 | Config inválida ou incompleta |
 | `GitError` | 4 | Não é repo git, ou HEAD destacado |
 | `DockerError` | 5 | Container ausente, ou comando docker falhou |
@@ -262,8 +321,17 @@ Exceções tipadas, todas herdando de `DbctlError`, cada uma com um `exit_code`:
 traceback vaza para o usuário em erro esperado; `--verbose` mostra o traceback completo.
 
 ### `project.py`
-- `find_project_root(start: Path) -> Path` — sobe de `start` até a raiz do filesystem procurando
-  `.dbctl.toml`. Levanta `ProjectNotFoundError` com mensagem explicando como injetar um projeto.
+- `project_root(start: Path) -> Path` — raiz do repositório git que contém `start`, via
+  `git -C <start> rev-parse --show-toplevel`. Fora de um repo git → `GitError`.
+- `find_config(start: Path, explicit: Path | None = None) -> Path` — implementa a ordem de descoberta
+  da seção 5.0: `explicit` (ou `DBCTL_CONFIG`) primeiro; depois busca subindo de `start` até o topo do
+  repo; por fim busca descendo do topo do repo (profundidade máxima 3, com poda de `.git`, `.venv`,
+  `node_modules`, `__pycache__` e diretórios começando com ponto). Zero resultados →
+  `ProjectNotFoundError` com mensagem explicando como injetar um projeto e citando `--config`/
+  `DBCTL_CONFIG`. Mais de um resultado na busca descendente → `ConfigError` listando os caminhos.
+- `hooks_dir(root: Path) -> Path` — diretório de hooks efetivo do repositório, via
+  `git -C <root> rev-parse --git-path hooks` (resolvido relativo a `root`). Respeita `core.hooksPath`
+  customizado, ao contrário de montar `<root>/.git/hooks` manualmente. `GitError` se não for repo git.
 - `current_branch(root: Path) -> str` — via `git -C <root> rev-parse --abbrev-ref HEAD`. Se retornar
   `HEAD` (detached), levanta `GitError` — não há branch para nomear o banco.
 
@@ -404,9 +472,66 @@ permite plugar um Odoo fora de Docker sem código novo no tool.
 Cada arquivo orquestra um caso de uso e retorna dados para a CLI formatar. Sem `print` direto — a
 formatação é responsabilidade de `cli.py`.
 
+### `commands/hook.py`
+Instala, remove e executa o hook `post-checkout` que mantém o Odoo servindo o banco certo a cada
+troca de branch (ver CU-3.1 na seção 7). Segue o mesmo contrato dos outros `commands/*.py`: retorna
+dados, nunca imprime.
+
+- Marcador `# GENERATED BY dbctl - DO NOT EDIT` no início do arquivo do hook, usado para diferenciar
+  um hook nosso de um hook de terceiros.
+- Script gerado por `install`, com o interpretador em caminho absoluto (`sys.executable`) e o
+  `.dbctl.toml` em uso embutido — assim o hook funciona independente da venv estar ativa e sem
+  depender da busca da seção 5.0 rodar de novo a cada checkout:
+  ```sh
+  #!/bin/sh
+  # GENERATED BY dbctl - DO NOT EDIT (dbctl hook install)
+  exec "<abs>/python" -m dbctl --config "<abs>/.dbctl.toml" hook post-checkout "$1" "$2" "$3"
+  ```
+- `install(cfg, *, force: bool = False) -> dict` — resolve `hooks_dir(project_root)`, cria o diretório
+  se preciso, escreve o script acima e aplica `chmod 0o755`.
+  - Arquivo já existe e tem o marcador → sobrescreve (`action: "updated"`).
+  - Arquivo já existe e **não** tem o marcador (hook de terceiros) → `DbctlError`, a menos que
+    `force=True`: nesse caso salva uma cópia como `post-checkout.bak` antes de sobrescrever. A
+    mensagem de erro sem `--force` mostra a linha `exec ...` para o usuário colar manualmente no
+    hook existente, como alternativa a perder o que já estava lá.
+  - Respeita `DBCTL_DRY_RUN`: descreve a ação, não escreve nada.
+- `uninstall(cfg) -> dict` — remove o arquivo **só** se contiver o marcador; nunca apaga um hook que
+  não foi gerado pelo dbctl. Sem arquivo → `{"action": "absent"}`.
+- `info(cfg) -> dict` — `{path, installed: bool, ours: bool, enabled: bool}`, usado por
+  `dbctl hook status` e pela linha `hook:` de `dbctl status`.
+- `on_checkout(cfg, prev: str, new: str, branch_flag: str) -> list[str]` — a lógica executada pelo
+  runner oculto `dbctl hook post-checkout`. Recebe os três argumentos que o git passa a um
+  `post-checkout` (`$1` SHA anterior, `$2` SHA novo, `$3` `1` se foi troca de branch / `0` se foi
+  checkout de arquivo). Ordem de decisão:
+  1. `branch_flag != "1"` → não faz nada (não foi uma troca de branch).
+  2. `hooks.enabled` é falso → não faz nada (estado escolhido pelo usuário).
+  3. HEAD destacado (`GitError` de `current_branch`, comum durante rebase/bisect) → registra aviso e
+     sai, sem tentar resolver banco algum.
+  4. `strategy.current_database()` já é igual ao banco alvo da branch atual → registra "já servindo
+     `<db>`" e sai. **A comparação certa é o banco servido, não `prev` vs `new`**: `git checkout -b`
+     a partir do commit atual troca de branch sem mudar o SHA, e `git checkout -- <arquivo>` já foi
+     descartado no passo 1, então esse é o único caso restante a considerar.
+  5. Banco alvo não existe → registra aviso sugerindo `dbctl create --use`, sai.
+  6. Caso contrário, delega para `commands/use.py::run(cfg)` (reuso — nunca reimplementar a escrita
+     do override aqui) e registra "serving `<db>`".
+  Todas as mensagens retornadas começam com `dbctl:`, para se destacarem no meio do output do git.
+  Esta função **nunca levanta** para o chamador: qualquer exceção interna vira uma linha de aviso na
+  lista de retorno — é o `cli.py` quem garante o exit 0 (regra de ouro abaixo), mas a função já se
+  protege por conta própria.
+
+**Regra de ouro do hook:** o `post-checkout` gerado **nunca** pode fazer o `git checkout` falhar.
+Todo caminho de erro — config ausente, Docker fora do ar, banco inexistente, HEAD destacado — termina
+em uma linha de aviso em stderr e exit code 0.
+
 ### `cli.py`
-Typer app. Um comando por caso de uso. Flags globais: `--verbose` (traceback completo) e
-`--project <path>` (força a raiz do projeto em vez de descobrir pela cwd).
+Typer app. Um comando por caso de uso, mais o sub-app `hook` (`install`, `uninstall`, `status`, e o
+comando oculto `post-checkout`). Flags globais: `--verbose` (traceback completo), `--project <path>`
+(força a raiz do projeto) e `--config <path>` (força o arquivo `.dbctl.toml`, ver 5.0).
+
+O comando `hook post-checkout` é o único que **não** passa pelo tratamento de erro padrão de
+`_run()`: ele envolve toda a chamada a `commands/hook.py::on_checkout` num `try/except Exception`
+próprio e sempre termina com `raise typer.Exit(0)`, para cumprir a regra de ouro do hook mesmo diante
+de um bug inesperado no próprio dbctl.
 
 ---
 
@@ -414,14 +539,16 @@ Typer app. Um comando por caso de uso. Flags globais: `--verbose` (traceback com
 
 ### CU-1 — Injetar um projeto novo
 **Ator:** desenvolvedor com um projeto Odoo ainda não gerenciado.
-1. Copia `.dbctl.example.toml` para a raiz do projeto como `.dbctl.toml`.
+1. Copia `.dbctl.example.toml` como `.dbctl.toml`, na raiz do projeto **ou** dentro de uma pasta já
+   ignorada pelo git (ver 4.3 e 5.0) — a segunda opção evita mexer em `.gitignore` versionado.
 2. Preenche containers, credenciais e template DB.
-3. Adiciona `.dbctl.toml` e a pasta de seeds ao `.gitignore` do projeto (o exemplo deve trazer essa
-   instrução comentada no topo).
-4. `dbctl status` → confirma que o projeto foi detectado e mostra o banco alvo da branch atual.
+3. Se optou pela raiz, adiciona `.dbctl.toml` e a pasta de seeds ao `.gitignore` do projeto (o exemplo
+   deve trazer essa instrução comentada no topo). Se colocou numa pasta já ignorada, este passo some.
+4. `dbctl status` → confirma que o projeto foi detectado, mostra qual `.dbctl.toml` foi usado
+   (`config:`) e o banco alvo da branch atual.
 
-**Critério:** nenhum arquivo versionado do projeto precisou ser alterado, exceto opcionalmente o
-`.gitignore`.
+**Critério:** nenhum arquivo versionado do projeto precisou ser alterado — nem o `.gitignore`, se o
+config foi colocado numa pasta já ignorada.
 
 ### CU-2 — Começar a trabalhar numa branch nova
 1. `git checkout -b GC-700-nova-feature`
@@ -435,6 +562,15 @@ Typer app. Um comando por caso de uso. Flags globais: `--verbose` (traceback com
 3. `git checkout GC-723-hotfix...` → `dbctl use`
 4. O Odoo sobe **sem erro**, porque o banco dessa branch nunca viu as mudanças da GC-629.
 5. Voltar para a GC-629 → `dbctl use` → o banco anterior está intacto.
+
+### CU-3.1 — Alternar entre branches sem lembrar do `dbctl use`
+1. `dbctl hook install` — uma vez só, instala o `post-checkout`.
+2. `git checkout GC-629-...` — o hook chama `dbctl use` sozinho; Odoo já sobe no banco certo.
+3. `git checkout GC-723-hotfix...` — idem, sem digitar `dbctl use`.
+4. Se a branch nova ainda não tem banco, o hook só avisa (`dbctl create --use` primeiro) — o checkout
+   nunca é bloqueado nem o tool cria banco sozinho durante um checkout.
+5. Para desligar temporariamente sem desinstalar: `[hooks] enabled = false` no `.dbctl.toml`, ou
+   `DBCTL_HOOKS_ENABLED=0` na sessão do shell.
 
 ### CU-4 — Banco sujou, recomeçar
 `dbctl reset` — dropa e recria a partir do template, com seeds. Uma confirmação, a não ser com `--yes`.
@@ -456,9 +592,10 @@ falhas esperadas.
 #### `dbctl status`
 - **Pré:** projeto encontrado, config válida, repo git.
 - **Passos:** resolve branch → nome do banco → checa existência → lê `current_database()` da estratégia
-  → detecta se há seed de branch.
-- **Saída:** projeto (caminho), branch, banco alvo, existe (sim/não), banco servido agora, template,
-  seed da branch detectado (caminho ou "nenhum").
+  → detecta se há seed de branch → lê `hook.info(cfg)`.
+- **Saída:** projeto (caminho da raiz), **config (caminho do `.dbctl.toml` em uso)**, branch, banco
+  alvo, existe (sim/não), banco servido agora, template, seed da branch detectado (caminho ou
+  "nenhum"), **hook** (`installed, enabled` / `installed, disabled` / `not installed`).
 - **Aviso opcional:** se `git status --porcelain` do projeto não estiver vazio, uma linha `warning:
   working tree has uncommitted changes` — o banco da branch pode não ter o schema do código ainda não
   commitado. Só aviso, nunca bloqueia.
@@ -515,6 +652,30 @@ falhas esperadas.
 
 #### `dbctl reset [--yes]`
 - Equivale a `drop --yes` (se existir) seguido de `create`. Uma única confirmação no início.
+
+#### `dbctl hook install [--force]`
+- **Pré:** projeto é um repo git (sempre é, ver 3.2).
+- **Passos:** `hook.install(cfg, force=...)`.
+- **Saída:** caminho do hook instalado, ou erro explicando `--force` e mostrando a linha `exec` para
+  colar manualmente, se já existir um `post-checkout` de terceiros.
+
+#### `dbctl hook uninstall`
+- **Passos:** `hook.uninstall(cfg)`.
+- **Saída:** confirma a remoção, ou avisa que não havia hook nosso instalado. Nunca remove hook de
+  terceiros.
+
+#### `dbctl hook status`
+- **Efeito colateral:** nenhum.
+- **Saída:** caminho do hook, se está instalado, se é nosso (`ours`) e se está habilitado
+  (`hooks.enabled`).
+
+#### `dbctl hook post-checkout <prev> <new> <branch_flag>` (oculto, chamado pelo git)
+- **Não é para uso manual** — é o comando que o script gerado por `hook install` invoca a cada
+  `post-checkout`. Recebe os três argumentos padrão do hook do git.
+- **Passos:** `hook.on_checkout(cfg, prev, new, branch_flag)`.
+- **Saída:** as linhas retornadas, prefixadas com `dbctl:`, em stderr.
+- **Sempre sai 0** — ver a regra de ouro em `commands/hook.py` (seção 6). Nenhum cenário de erro pode
+  fazer o `git checkout` do usuário falhar.
 
 ---
 
@@ -615,6 +776,20 @@ leitura (`dbctl status`), nunca para criar, dropar ou reiniciar serviços.
 | V5 | `DBCTL_POSTGRES_PASSWORD=x dbctl status` com senha removida do arquivo | Funciona (env var tem precedência) |
 | V6 | `git checkout --detach` e `dbctl status` | Exit 4, mensagem sobre HEAD destacado |
 
+### 10.1.1 Localização do `.dbctl.toml` (seção 5.0)
+
+| # | Ação | Resultado esperado |
+|---|---|---|
+| C1 | `.dbctl.toml` na raiz, `dbctl status` de uma subpasta | Igual ao comportamento de sempre; `config:` mostra o caminho na raiz |
+| C2 | Mover o config para `temp/.dbctl.toml`, rodar `dbctl status` da raiz | Encontrado pela busca descendente; `project:` continua sendo o topo do repo |
+| C3 | Com o config em `temp/`, `seeds.path = "temp/seeds"` | Resolvido a partir da raiz do repo — mesma pasta de sempre, não relativa a `temp/` |
+| C4 | Dois `.dbctl.toml` no repo (raiz e `temp/`) | `ConfigError` listando os dois caminhos e sugerindo `--config` |
+| C5 | `dbctl --config temp/.dbctl.toml status` no cenário de C4 | Funciona, sem ambiguidade |
+| C6 | `DBCTL_CONFIG=/abs/temp/.dbctl.toml dbctl status` | Idem C5 |
+| C7 | `--config` apontando para um arquivo inexistente | `ConfigError` claro, exit 3 |
+| C8 | Rodar `dbctl status` fora de qualquer repositório git | `GitError`, exit 4 (não `ProjectNotFoundError`) |
+| C9 | Config numa pasta ignorada pelo git, `git status` do projeto | Working tree limpo — o arquivo de credenciais não aparece |
+
 ### 10.2 Naming
 
 | # | Ação | Resultado esperado |
@@ -668,6 +843,24 @@ leitura (`dbctl status`), nunca para criar, dropar ou reiniciar serviços.
 | V33 | Conferir `ir.cron` no clone | **Ativos** (decisão deliberada) |
 | V34 | `dbctl drop` sem `--yes`, respondendo "não" | Exit 130, nada removido |
 
+### 10.6.1 Hook `post-checkout`
+
+| # | Ação | Resultado esperado |
+|---|---|---|
+| H1 | `dbctl hook install` | `.git/hooks/post-checkout` executável, com o marcador `GENERATED BY dbctl` |
+| H2 | `dbctl hook status` | `installed: yes (dbctl)`, `enabled: yes` |
+| H3 | `create --use` na `feature-a`; depois `git checkout feature-b` (banco já existente) | Saída `dbctl: serving <db da feature-b>`; override passa a apontar para o banco novo |
+| H4 | `git checkout -b branch-nova` | Aviso sugerindo `dbctl create --use`; exit 0; checkout concluído |
+| H5 | `[hooks] enabled = false`, depois `git checkout feature-a` | Nenhuma saída do dbctl; override permanece intacto |
+| H6 | `DBCTL_HOOKS_ENABLED=0 git checkout feature-b` | Idem H5 |
+| H7 | `git checkout -- <arquivo>` (sem trocar de branch) | Hook não faz nada (branch_flag `0`) |
+| H8 | `git checkout --detach` | Aviso sobre HEAD destacado; **exit 0** |
+| H9 | Parar os containers e rodar `git checkout feature-a` | `dbctl: hook failed: ...`; checkout ainda assim conclui |
+| H10 | Criar um `post-checkout` próprio (sem o marcador), rodar `dbctl hook install` | Erro explicando `--force` e mostrando a linha `exec` para colar manualmente |
+| H11 | `dbctl hook install --force` no cenário de H10 | `post-checkout.bak` criado com o conteúdo anterior; hook do dbctl instalado |
+| H12 | `dbctl hook uninstall` | Arquivo removido; rodar de novo → relata que não havia hook nosso |
+| H13 | `DBCTL_DRY_RUN=1 dbctl hook install` | Descreve a ação pretendida, não escreve nada em disco |
+
 ### 10.7 Agnosticismo — validação automatizável
 
 | # | Ação | Resultado esperado |
@@ -691,7 +884,8 @@ Usados para validar o trabalho entregue. Um item não atendido é uma correção
 3. **Agnosticismo:** V35 retorna zero ocorrências e V36 passa.
 4. **Seeds desacoplados:** seeds não importam o `dbctl` e funcionam como arquivos soltos (V30).
 5. **Sem edição de arquivo versionado do projeto injetado:** o tool só escreve o `override_file`
-   (gitignored). Em particular, **jamais** edita `config/odoo.conf` ou `docker-compose.yml`.
+   (gitignored) e o `post-checkout` (não versionado — vive em `.git/hooks/` ou no `core.hooksPath`
+   customizado). Em particular, **jamais** edita `config/odoo.conf` ou `docker-compose.yml`.
 6. **Erros tratados:** todo erro esperado sai com mensagem legível e exit code da tabela de `errors.py`
    — nunca traceback cru (V2, V3, V4, V6, V12).
 
@@ -724,7 +918,6 @@ grep -A5 "dependencies" ~/projects/dbctl/pyproject.toml ; echo "esperado: apenas
 
 - Git worktrees, ou rodar duas branches simultaneamente.
 - Drivers adicionais de estratégia além de `compose-override` e do escape hatch `custom`.
-- Hooks de git que troquem o banco automaticamente no `checkout`.
 - Migração/backfill de dados entre bancos de branches diferentes.
 - Interface web, TUI ou empacotamento para PyPI.
 - Suporte a Postgres fora de container.

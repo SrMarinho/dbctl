@@ -6,6 +6,7 @@ returns plain data for this module to format.
 
 from __future__ import annotations
 
+import os
 import re
 import traceback
 from pathlib import Path
@@ -27,7 +28,7 @@ from dbctl.commands import (
 from dbctl.config import Config, load_config
 from dbctl.docker import compose
 from dbctl.errors import DbctlError, DockerError
-from dbctl.project import find_project_root
+from dbctl.project import find_config
 
 app = typer.Typer(
     no_args_is_help=True,
@@ -47,7 +48,12 @@ def _main(
         None,
         "--project",
         "-p",
-        help="Project root (default: discover .dbctl.toml from the cwd).",
+        help="Project root (default: discover the git repo from the cwd).",
+    ),
+    config: str | None = typer.Option(
+        None,
+        "--config",
+        help="Path to the .dbctl.toml (default: discovery, spec 5.0).",
     ),
     version: bool = typer.Option(
         False, "--version", help="Show the dbctl version and exit."
@@ -56,23 +62,32 @@ def _main(
     if version:
         typer.echo(f"dbctl {__version__}")
         raise typer.Exit()
-    ctx.obj = {"verbose": verbose, "project": project}
+    ctx.obj = {"verbose": verbose, "project": project, "config": config}
 
 
 # --------------------------------------------------------------------------
 # helpers
 # --------------------------------------------------------------------------
 
-def _config(ctx: typer.Context) -> Config:
+def _load_config(ctx: typer.Context, *, quiet: bool = False) -> Config:
+    """Resolve project root + config file (spec 5.0) and load the config."""
     opts = ctx.obj
-    root = (
+    explicit = opts.get("config") or os.environ.get("DBCTL_CONFIG")
+    root_override = (
         Path(opts["project"]).expanduser().resolve()
-        if opts["project"]
-        else find_project_root(Path.cwd())
+        if opts.get("project")
+        else None
     )
-    cfg = load_config(root)
-    for warning in cfg.warnings:
-        typer.echo(f"warning: {warning}", err=True)
+    start = root_override if root_override else Path.cwd()
+    config_path, project_root = find_config(
+        start,
+        explicit=Path(explicit).expanduser().resolve() if explicit else None,
+        root_override=root_override,
+    )
+    cfg = load_config(project_root, config_path)
+    if not quiet:
+        for warning in cfg.warnings:
+            typer.echo(f"warning: {warning}", err=True)
     return cfg
 
 
@@ -118,11 +133,12 @@ def _web_url(cfg: Config) -> str | None:
 def status(ctx: typer.Context) -> None:
     """Show project, branch, target database and what is being served."""
     def _do() -> None:
-        cfg = _config(ctx)
+        cfg = _load_config(ctx)
         info = status_cmd.run(cfg)
         served = info["served"] or "none (base config)"
         seed = info["branch_seed"] or "none"
         typer.echo(f"project:     {info['project']}")
+        typer.echo(f"config:      {info['config']}")
         typer.echo(f"branch:      {info['branch']}")
         typer.echo(f"target db:   {info['target_db']}")
         typer.echo(f"exists:      {'yes' if info['exists'] else 'no'}")
@@ -154,7 +170,7 @@ def create(
 ) -> None:
     """Clone the template into the branch database (filestore + sanitize + seeds)."""
     def _do() -> None:
-        cfg = _config(ctx)
+        cfg = _load_config(ctx)
         result = create_cmd.run(
             cfg, template=from_template, no_seed=no_seed, use=use
         )
@@ -175,7 +191,7 @@ def create(
 def use(ctx: typer.Context) -> None:
     """Point the Odoo service at the branch database."""
     def _do() -> None:
-        cfg = _config(ctx)
+        cfg = _load_config(ctx)
         result = use_cmd.run(cfg)
         url = _web_url(cfg)
         typer.echo(f"serving {result['db']}" + (f" ({url})" if url else ""))
@@ -187,7 +203,7 @@ def use(ctx: typer.Context) -> None:
 def unuse(ctx: typer.Context) -> None:
     """Remove the compose override; next `docker compose up` uses base config."""
     def _do() -> None:
-        cfg = _config(ctx)
+        cfg = _load_config(ctx)
         result = unuse_cmd.run(cfg)
         if result["removed"]:
             typer.echo(
@@ -213,7 +229,7 @@ def upgrade(
 ) -> None:
     """Apply schema upgrades (-u) to the branch database only."""
     def _do() -> None:
-        cfg = _config(ctx)
+        cfg = _load_config(ctx)
         module_list = (
             [part.strip() for part in modules.split(",") if part.strip()]
             if modules
@@ -231,7 +247,7 @@ def upgrade(
 def seed(ctx: typer.Context) -> None:
     """Run base.py and the branch seed, if present."""
     def _do() -> None:
-        cfg = _config(ctx)
+        cfg = _load_config(ctx)
         result = seed_cmd.run(cfg)
         if result.get("skipped"):
             typer.echo(
@@ -249,7 +265,7 @@ def seed(ctx: typer.Context) -> None:
 def list_dbs(ctx: typer.Context) -> None:
     """List the project's branch databases (prefix only) with sizes."""
     def _do() -> None:
-        cfg = _config(ctx)
+        cfg = _load_config(ctx)
         result = list_cmd.run(cfg)
         if not result["rows"]:
             typer.echo(f"no databases with prefix '{cfg.postgres.db_prefix}'.")
@@ -274,7 +290,7 @@ def drop(
 ) -> None:
     """Drop a branch database and its filestore (prefix-guarded)."""
     def _do() -> None:
-        cfg = _config(ctx)
+        cfg = _load_config(ctx)
         result = drop_cmd.run(cfg, yes=yes, db=db, ask=_ask)
         if result["existed"]:
             typer.echo(f"dropped {result['db']} (database + filestore)")
@@ -291,7 +307,7 @@ def reset(
 ) -> None:
     """Drop and recreate the branch database from the template (with seeds)."""
     def _do() -> None:
-        cfg = _config(ctx)
+        cfg = _load_config(ctx)
         result = reset_cmd.run(cfg, yes=yes, ask=_ask)
         typer.echo(f"reset {result['db']} from {result['source']}")
         if result["seeds"]:

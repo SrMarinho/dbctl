@@ -1,10 +1,15 @@
 # dbctl project configuration.
 #
-# Copy this file to <project>/.dbctl.toml and fill in the values.
+# Copy this file to your project as .dbctl.toml and fill in the values.
+# The file can live at the repository root OR inside an already-ignored
+# folder (e.g. temp/), which avoids touching a versioned .gitignore.
 #
-# IMPORTANT: add ".dbctl.toml" (and your seeds folder, if it lives outside
-# an already-ignored directory) to the project's .gitignore. This file
-# contains local credentials and must never be committed.
+# IMPORTANT: if you placed it at the root, add ".dbctl.toml" (and your seeds
+# folder, if it lives outside an already-ignored directory) to the project's
+# .gitignore. This file contains local credentials and must never be
+# committed. Relative paths inside this file (seeds.path, compose_file,
+# override_file) resolve against the GIT REPOSITORY ROOT, not this file's
+# folder.
 #
 # Every key can be overridden by an environment variable named
 # DBCTL_<SECTION>_<KEY> (uppercase), e.g. DBCTL_POSTGRES_PASSWORD.
@@ -31,6 +36,11 @@ mount = "/mnt/dbctl-seeds"              # optional, default "/mnt/dbctl-seeds"
 [strategy]
 kind          = "compose-override"      # "compose-override" | "custom"
 override_file = "docker-compose.override.yaml"   # only for compose-override
+
+[hooks]
+enabled = true                          # optional, default true; false disables
+                                        # the post-checkout hook without
+                                        # uninstalling it (`dbctl hook`)
 
 # Escape hatch - only when kind = "custom".
 # Placeholders available: {db}, {modules}, {project_root}

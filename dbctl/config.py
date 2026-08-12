@@ -62,13 +62,19 @@ class StrategyConfig:
 
 
 @dataclass
+class HooksConfig:
+    enabled: bool = True
+
+
+@dataclass
 class Config:
-    project_root: Path
-    path: Path  # the .dbctl.toml file itself
+    project_root: Path  # git top-level: base of all relative paths
+    path: Path  # the .dbctl.toml file itself (anywhere in the repo tree)
     postgres: PostgresConfig
     odoo: OdooConfig
     seeds: SeedsConfig
     strategy: StrategyConfig
+    hooks: HooksConfig = field(default_factory=HooksConfig)
     warnings: list[str] = field(default_factory=list)
 
     @property
@@ -91,6 +97,22 @@ def _split_list(value: str | None) -> list[str] | None:
     return [part.strip() for part in value.split(",") if part.strip()]
 
 
+_TRUE_LITERALS = {"1", "true", "yes", "on"}
+_FALSE_LITERALS = {"0", "false", "no", "off"}
+
+
+def _parse_bool(value: str, key: str) -> bool:
+    normalized = value.strip().lower()
+    if normalized in _TRUE_LITERALS:
+        return True
+    if normalized in _FALSE_LITERALS:
+        return False
+    raise ConfigError(
+        f"invalid value for {key}: '{value}' - expected one of "
+        "1/true/yes/on or 0/false/no/off (case-insensitive)"
+    )
+
+
 def _require(section: str, raw: dict, key: str, missing: list[str]) -> str:
     """File value, env override, or a missing-key entry."""
     env_value = _env(section, key)
@@ -103,9 +125,15 @@ def _require(section: str, raw: dict, key: str, missing: list[str]) -> str:
     return str(value)
 
 
-def load_config(root: Path) -> Config:
-    """Read, validate and normalize the configuration for ``root``."""
-    cfg_path = root / ".dbctl.toml"
+def load_config(project_root: Path, config_path: Path) -> Config:
+    """Read, validate and normalize the configuration.
+
+    ``project_root`` is the git top-level of the repository (the base of
+    every relative path in the config - spec 5.0); ``config_path`` is the
+    .dbctl.toml file itself, anywhere inside the repository.
+    """
+    cfg_path = config_path.expanduser().resolve()
+    root = project_root.expanduser().resolve()
     if not cfg_path.is_file():
         raise ConfigError(f"missing configuration file: {cfg_path}")
     try:
@@ -175,6 +203,8 @@ def load_config(root: Path) -> Config:
         seeds_path_raw = str(sd_raw["path"])
     seeds_path: Path | None = None
     if seeds_path_raw:
+        # Resolved from the git repo root (spec 5.0/rule 7), never from the
+        # folder where the .dbctl.toml happens to live.
         seeds_path = (root / seeds_path_raw).resolve()
         if not seeds_path.is_dir():
             warnings.append(
@@ -214,6 +244,20 @@ def load_config(root: Path) -> Config:
             "[strategy.commands].start and [strategy.commands].stop"
         )
 
+    # --- [hooks] ---------------------------------------------------------
+    env_enabled = _env("hooks", "enabled")
+    if env_enabled is not None:
+        enabled = _parse_bool(env_enabled, "DBCTL_HOOKS_ENABLED")
+    else:
+        raw_enabled = data.get("hooks", {}).get("enabled", True)
+        if not isinstance(raw_enabled, bool):
+            raise ConfigError(
+                f"invalid [hooks].enabled in {cfg_path}: expected a TOML "
+                f"boolean (true/false), got {raw_enabled!r}. "
+                "A missing [hooks] block is equivalent to enabled = true."
+            )
+        enabled = raw_enabled
+
     return Config(
         project_root=root,
         path=cfg_path,
@@ -237,5 +281,6 @@ def load_config(root: Path) -> Config:
             override_file=override_file,
             commands=commands,
         ),
+        hooks=HooksConfig(enabled=enabled),
         warnings=warnings,
     )

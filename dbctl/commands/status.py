@@ -20,6 +20,7 @@ def run(cfg: Config) -> dict:
             branch_seed = candidate
     return {
         "project": str(cfg.project_root),
+        "config": str(cfg.path),
         "branch": branch,
         "target_db": db,
         "exists": database_exists(cfg, db),
