@@ -31,6 +31,7 @@ from dbctl.project import find_project_root
 
 app = typer.Typer(
     no_args_is_help=True,
+    invoke_without_command=True,
     add_completion=False,
     help="One Odoo database per git branch - agnostic, Docker-based.",
 )
@@ -48,7 +49,13 @@ def _main(
         "-p",
         help="Project root (default: discover .dbctl.toml from the cwd).",
     ),
+    version: bool = typer.Option(
+        False, "--version", help="Show the dbctl version and exit."
+    ),
 ) -> None:
+    if version:
+        typer.echo(f"dbctl {__version__}")
+        raise typer.Exit()
     ctx.obj = {"verbose": verbose, "project": project}
 
 
