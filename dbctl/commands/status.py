@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dbctl.commands import target_db
+from dbctl.commands import hook_info, target_db
 from dbctl.config import Config
 from dbctl.naming import slugify
 from dbctl.postgres import database_exists
@@ -27,5 +27,6 @@ def run(cfg: Config) -> dict:
         "served": strategy.current_database(),
         "template": cfg.postgres.template_db,
         "branch_seed": str(branch_seed) if branch_seed else None,
+        "hook": hook_info(cfg),
         "dirty": working_tree_dirty(cfg.project_root),
     }

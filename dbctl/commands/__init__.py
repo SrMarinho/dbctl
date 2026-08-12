@@ -16,6 +16,13 @@ def dry() -> bool:
     return os.environ.get("DBCTL_DRY_RUN") == "1"
 
 
+def hook_info(cfg: Config) -> dict:
+    """Post-checkout hook state, per commands/hook.info (read by status)."""
+    from dbctl.commands.hook import info
+
+    return info(cfg)
+
+
 def target_db(cfg: Config) -> tuple[str, str]:
     """(branch, database name) for the current branch of the project."""
     branch = current_branch(cfg.project_root)

@@ -10,6 +10,7 @@ concepts. All relative paths in the config resolve against project_root.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from dbctl.docker import run
@@ -126,6 +127,9 @@ def hooks_dir(root: Path) -> Path:
     Respects a custom core.hooksPath, unlike assembling <root>/.git/hooks by
     hand. Raises GitError when ``root`` is not a git repository.
     """
+    if os.environ.get("DBCTL_DRY_RUN") == "1":
+        # git returns nothing in dry-run; show the conventional path.
+        return root / ".git" / "hooks"
     try:
         out = run(
             ["git", "-C", str(root), "rev-parse", "--git-path", "hooks"],
