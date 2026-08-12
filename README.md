@@ -40,9 +40,14 @@ template existente.
    # edite: containers, credenciais, template_db, default_modules, seeds
    ```
 
-2. Adicione ao `.gitignore` do projeto: `.dbctl.toml` (e a pasta de seeds, se
-   não estiver numa pasta já ignorada). O arquivo contém credenciais locais e
-   nunca deve ser commitado.
+   O `.dbctl.toml` pode viver **na raiz do repositório** ou **em qualquer
+   subpasta** — inclusive numa pasta já ignorada pelo git (ex.: `temp/`), o que
+   evita tocar num `.gitignore` versionado. Os caminhos relativos do config
+   (`seeds.path`, `compose_file`, `override_file`) são sempre resolvidos a
+   partir da **raiz do repositório git**, não da pasta do arquivo.
+
+2. Se colocou na raiz, adicione `.dbctl.toml` (e a pasta de seeds) ao
+   `.gitignore` do projeto. Se usou uma pasta já ignorada, este passo some.
 
 3. Confirme:
 
@@ -50,6 +55,19 @@ template existente.
    cd <projeto>
    dbctl status
    ```
+
+**Descoberta do config (spec 5.0)** — a primeira que resolver vence:
+
+1. `--config PATH` ou `DBCTL_CONFIG` (explícito, ignora a busca);
+2. subindo da cwd até o topo do repositório git (`git rev-parse
+   --show-toplevel`);
+3. descendo do topo, profundidade máxima 3 (podando `.git`, `.venv`,
+   `node_modules`, `__pycache__` e diretórios começando com ponto).
+
+Zero resultados → erro 2; **mais de um** → erro 3 listando todos os caminhos
+(ambiguidade nunca é resolvida em silêncio — use `--config`). Fora de um
+repositório git → erro 4. `-p/--project` força a raiz do projeto quando a
+descoberta automática não basta, e pode ser combinado com `--config`.
 
 Todas as chaves do `.dbctl.toml` aceitam override por env var no padrão
 `DBCTL_<SEÇÃO>_<CHAVE>` (ex.: `DBCTL_POSTGRES_PASSWORD`). Precedência:
@@ -75,6 +93,27 @@ dbctl drop                # remove banco + filestore (confirmação)
 dbctl unuse               # remove o override; o projeto volta à config base
 ```
 
+## Hook post-checkout (opcional, CU-3.1)
+
+Quer trocar de branch sem digitar `dbctl use`? Instale o hook uma vez:
+
+```bash
+dbctl hook install        # instala .git/hooks/post-checkout (chmod 0755)
+dbctl hook status         # path, dono (dbctl/terceiro), enabled
+dbctl hook uninstall      # remove SÓ se foi o dbctl que gerou
+```
+
+A partir daí, todo `git checkout <branch>` com banco existente roda o `use`
+sozinho (`dbctl: serving <db>` no output do git). **Regra de ouro:** o hook
+nunca faz o checkout falhar — config ausente, Docker fora do ar, banco
+inexistente e HEAD destacado viram avisos `dbctl:` e o checkout sempre
+conclui com exit 0.
+
+Para desligar temporariamente sem desinstalar: `[hooks] enabled = false` no
+`.dbctl.toml` (ou `DBCTL_HOOKS_ENABLED=0` na sessão). Se já existir um
+`post-checkout` de terceiros, o `install` recusa com a linha `exec` para colar
+manualmente; `install --force` faz backup como `post-checkout.bak` e sobrescreve.
+
 | Comando | O que faz |
 |---|---|
 | `status` | Relatório somente-leitura: branch, banco alvo, servido, seed da branch |
@@ -86,8 +125,10 @@ dbctl unuse               # remove o override; o projeto volta à config base
 | `list` | Lista só os bancos com o `db_prefix`, com tamanho e marcações |
 | `drop [--yes] [--db NAME]` | Remove banco + filestore; **recusa** nome sem o prefixo |
 | `reset [--yes]` | Drop + create com seeds; uma única confirmação |
+| `hook install/uninstall/status` | Gerencia o post-checkout (ver seção acima) |
 
-Flags globais: `--verbose` (traceback completo) e `--project <caminho>`.
+Flags globais: `--verbose` (traceback completo), `--project <caminho>` e
+`--config <caminho>`.
 `DBCTL_DRY_RUN=1` imprime os comandos sem executar.
 
 ## Como o banco da branch é escolhido
