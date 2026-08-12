@@ -1,0 +1,241 @@
+"""Load and validate the project's .dbctl.toml.
+
+Validation fails BEFORE any side effect, with a message pointing at the
+offending key and the file path. All keys accept an environment override
+in the DBCTL_<SECTION>_<KEY> pattern (uppercase). Precedence:
+env var > file > default.
+"""
+
+from __future__ import annotations
+
+import os
+import re
+import tomllib
+from dataclasses import dataclass, field
+from pathlib import Path
+
+from dbctl.errors import ConfigError
+
+_DB_PREFIX_RE = re.compile(r"^[a-z][a-z0-9_]*$")
+_MAX_PREFIX_LEN = 56  # keeps prefix + "_" + 6-hex digest <= 63 (Postgres limit)
+_STRATEGY_KINDS = ("compose-override", "custom")
+
+
+@dataclass
+class PostgresConfig:
+    container: str
+    user: str
+    password: str
+    template_db: str
+    db_prefix: str = "dev_"
+
+
+@dataclass
+class OdooConfig:
+    container: str
+    compose_service: str
+    compose_file: str = "docker-compose.yml"
+    data_dir: str = "/var/lib/odoo"
+    default_modules: list[str] = field(default_factory=list)
+
+
+@dataclass
+class SeedsConfig:
+    path: Path | None = None  # absolute; None when not configured
+    mount: str = "/mnt/dbctl-seeds"
+    configured: bool = False  # True when [seeds] or env override exists
+
+
+@dataclass
+class StrategyCommands:
+    start: str | None = None
+    stop: str | None = None
+    upgrade: str | None = None
+    shell: str | None = None
+
+
+@dataclass
+class StrategyConfig:
+    kind: str = "compose-override"
+    override_file: str = "docker-compose.override.yaml"
+    commands: StrategyCommands = field(default_factory=StrategyCommands)
+
+
+@dataclass
+class Config:
+    project_root: Path
+    path: Path  # the .dbctl.toml file itself
+    postgres: PostgresConfig
+    odoo: OdooConfig
+    seeds: SeedsConfig
+    strategy: StrategyConfig
+    warnings: list[str] = field(default_factory=list)
+
+    @property
+    def compose_files(self) -> list[str]:
+        """Base compose file, plus the override when it exists."""
+        files = [self.odoo.compose_file]
+        override = self.project_root / self.strategy.override_file
+        if override.is_file():
+            files.append(self.strategy.override_file)
+        return files
+
+
+def _env(section: str, key: str) -> str | None:
+    return os.environ.get(f"DBCTL_{section.upper()}_{key.upper()}")
+
+
+def _split_list(value: str | None) -> list[str] | None:
+    if value is None:
+        return None
+    return [part.strip() for part in value.split(",") if part.strip()]
+
+
+def _require(section: str, raw: dict, key: str, missing: list[str]) -> str:
+    """File value, env override, or a missing-key entry."""
+    env_value = _env(section, key)
+    if env_value is not None:
+        return env_value
+    value = raw.get(key)
+    if value is None or (isinstance(value, str) and not value.strip()):
+        missing.append(f"[{section}].{key}")
+        return ""
+    return str(value)
+
+
+def load_config(root: Path) -> Config:
+    """Read, validate and normalize the configuration for ``root``."""
+    cfg_path = root / ".dbctl.toml"
+    if not cfg_path.is_file():
+        raise ConfigError(f"missing configuration file: {cfg_path}")
+    try:
+        with cfg_path.open("rb") as fh:
+            data = tomllib.load(fh)
+    except tomllib.TOMLDecodeError as exc:
+        raise ConfigError(f"invalid TOML in {cfg_path}: {exc}") from exc
+
+    warnings: list[str] = []
+
+    # --- [postgres] ------------------------------------------------------
+    pg_raw = data.get("postgres", {})
+    missing: list[str] = []
+    container = _require("postgres", pg_raw, "container", missing)
+    user = _require("postgres", pg_raw, "user", missing)
+    template_db = _require("postgres", pg_raw, "template_db", missing)
+    password = _env("postgres", "password") or (
+        pg_raw.get("password") if isinstance(pg_raw.get("password"), str) else None
+    )
+    if password is None:
+        missing.append("[postgres].password (or set DBCTL_POSTGRES_PASSWORD)")
+    db_prefix = _env("postgres", "db_prefix") or str(pg_raw.get("db_prefix", "dev_"))
+
+    if not _DB_PREFIX_RE.match(db_prefix):
+        missing.append(
+            f"[postgres].db_prefix '{db_prefix}' must match ^[a-z][a-z0-9_]*$ "
+            "(it is the protection against dropping someone else's database)"
+        )
+    elif len(db_prefix) > _MAX_PREFIX_LEN:
+        missing.append(
+            f"[postgres].db_prefix must be at most {_MAX_PREFIX_LEN} chars "
+            "so branch database names stay <= 63 chars"
+        )
+
+    if missing:
+        raise ConfigError(
+            f"invalid or incomplete configuration in {cfg_path}:\n"
+            + "\n".join(f"  - {m}" for m in missing)
+        )
+    assert password is not None  # guaranteed by the check above
+
+    # --- [odoo] ----------------------------------------------------------
+    od_raw = data.get("odoo", {})
+    missing = []
+    odoo_container = _require("odoo", od_raw, "container", missing)
+    compose_service = _require("odoo", od_raw, "compose_service", missing)
+    if missing:
+        raise ConfigError(
+            f"invalid or incomplete configuration in {cfg_path}:\n"
+            + "\n".join(f"  - {m}" for m in missing)
+        )
+    compose_file = _env("odoo", "compose_file") or str(od_raw.get("compose_file", "docker-compose.yml"))
+    data_dir = _env("odoo", "data_dir") or str(od_raw.get("data_dir", "/var/lib/odoo"))
+    default_modules = _split_list(_env("odoo", "default_modules"))
+    if default_modules is None:
+        raw_modules = od_raw.get("default_modules", [])
+        default_modules = list(raw_modules) if isinstance(raw_modules, list) else []
+
+    # --- [seeds] ---------------------------------------------------------
+    sd_raw = data.get("seeds", {})
+    seeds_configured = bool(sd_raw) or any(
+        os.environ.get(k)
+        for k in ("DBCTL_SEEDS_PATH", "DBCTL_SEEDS_MOUNT")
+    )
+    seeds_path_raw = _env("seeds", "path")
+    if seeds_path_raw is None and sd_raw.get("path") is not None:
+        seeds_path_raw = str(sd_raw["path"])
+    seeds_path: Path | None = None
+    if seeds_path_raw:
+        seeds_path = (root / seeds_path_raw).resolve()
+        if not seeds_path.is_dir():
+            warnings.append(
+                f"seeds.path '{seeds_path}' does not exist - 'dbctl seed' will be a no-op"
+            )
+    mount = _env("seeds", "mount") or str(sd_raw.get("mount", "/mnt/dbctl-seeds"))
+
+    # --- [strategy] ------------------------------------------------------
+    st_raw = data.get("strategy", {})
+    kind = _env("strategy", "kind") or str(st_raw.get("kind", "compose-override"))
+    if kind not in _STRATEGY_KINDS:
+        raise ConfigError(
+            f"invalid [strategy].kind '{kind}' in {cfg_path}: "
+            f"valid values are {', '.join(_STRATEGY_KINDS)}"
+        )
+    override_file = _env("strategy", "override_file") or str(
+        st_raw.get("override_file", "docker-compose.override.yaml")
+    )
+    cmds_raw = st_raw.get("commands", {}) if isinstance(st_raw.get("commands", {}), dict) else {}
+
+    def _cmd(key: str) -> str | None:
+        env_value = _env("strategy_commands", key)
+        if env_value is not None:
+            return env_value
+        value = cmds_raw.get(key)
+        return str(value) if isinstance(value, str) and value.strip() else None
+
+    commands = StrategyCommands(
+        start=_cmd("start"),
+        stop=_cmd("stop"),
+        upgrade=_cmd("upgrade"),
+        shell=_cmd("shell"),
+    )
+    if kind == "custom" and (not commands.start or not commands.stop):
+        raise ConfigError(
+            f"strategy.kind = 'custom' in {cfg_path} requires "
+            "[strategy.commands].start and [strategy.commands].stop"
+        )
+
+    return Config(
+        project_root=root,
+        path=cfg_path,
+        postgres=PostgresConfig(
+            container=container,
+            user=user,
+            password=password,
+            template_db=template_db,
+            db_prefix=db_prefix,
+        ),
+        odoo=OdooConfig(
+            container=odoo_container,
+            compose_service=compose_service,
+            compose_file=compose_file,
+            data_dir=data_dir,
+            default_modules=default_modules,
+        ),
+        seeds=SeedsConfig(path=seeds_path, mount=mount, configured=seeds_configured),
+        strategy=StrategyConfig(
+            kind=kind,
+            override_file=override_file,
+            commands=commands,
+        ),
+        warnings=warnings,
+    )

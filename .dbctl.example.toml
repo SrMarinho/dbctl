@@ -1,0 +1,41 @@
+# dbctl project configuration.
+#
+# Copy this file to <project>/.dbctl.toml and fill in the values.
+#
+# IMPORTANT: add ".dbctl.toml" (and your seeds folder, if it lives outside
+# an already-ignored directory) to the project's .gitignore. This file
+# contains local credentials and must never be committed.
+#
+# Every key can be overridden by an environment variable named
+# DBCTL_<SECTION>_<KEY> (uppercase), e.g. DBCTL_POSTGRES_PASSWORD.
+# Precedence: env var > file > default.
+
+[postgres]
+container   = "my-postgres-container"   # required
+user        = "my_db_user"              # required
+# password  = "..."                     # optional if DBCTL_POSTGRES_PASSWORD is set
+template_db = "my_template_db"          # required
+db_prefix   = "dev_"                    # optional, default "dev_"
+
+[odoo]
+container       = "my-odoo-container"   # required
+compose_service = "web"                 # required
+compose_file    = "docker-compose.yml"  # optional, default "docker-compose.yml"
+data_dir        = "/var/lib/odoo"       # optional, default "/var/lib/odoo"
+default_modules = ["my_module"]         # optional; used by `upgrade` without -m
+
+[seeds]
+path  = "temp/seeds"                    # optional; if absent, `seed` is a no-op with a notice
+mount = "/mnt/dbctl-seeds"              # optional, default "/mnt/dbctl-seeds"
+
+[strategy]
+kind          = "compose-override"      # "compose-override" | "custom"
+override_file = "docker-compose.override.yaml"   # only for compose-override
+
+# Escape hatch - only when kind = "custom".
+# Placeholders available: {db}, {modules}, {project_root}
+# [strategy.commands]
+# start   = "..."
+# stop    = "..."
+# upgrade = "..."
+# shell   = "..."
