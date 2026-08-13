@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dbctl import logging as dlog
 from dbctl.commands import hook_info, target_db
 from dbctl.config import Config
 from dbctl.errors import ConfigError, DockerError, GitError
@@ -48,6 +49,16 @@ def run(cfg: Config) -> dict:
         candidate = cfg.seeds.path / "branches" / f"{slugify(branch)}.py"
         if candidate.is_file():
             branch_seed = candidate
+    changed = _changed_preview(cfg)
+    dlog.info(
+        "status",
+        branch=branch,
+        db=db,
+        exists=database_exists(cfg, db),
+        served=strategy.current_database(),
+        changed_modules=changed.get("modules", []),
+        hook_installed=hook_info(cfg)["installed"],
+    )
     return {
         "project": str(cfg.project_root),
         "config": str(cfg.path),
@@ -58,6 +69,6 @@ def run(cfg: Config) -> dict:
         "template": cfg.postgres.template_db,
         "branch_seed": str(branch_seed) if branch_seed else None,
         "hook": hook_info(cfg),
-        "changed_modules": _changed_preview(cfg),
+        "changed_modules": changed,
         "dirty": working_tree_dirty(cfg.project_root),
     }

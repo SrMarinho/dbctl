@@ -9,9 +9,11 @@ from __future__ import annotations
 import os
 import shlex
 import subprocess
+import time
 from pathlib import Path
 from typing import Iterable
 
+from dbctl import logging as dlog
 from dbctl.errors import DockerError
 
 
@@ -26,6 +28,13 @@ def _build_env(extra: dict[str, str] | None) -> dict[str, str]:
     return env
 
 
+def _tail(text: str | None, limit: int = 4000) -> str:
+    """Last ``limit`` chars of stderr/stdout for the log (bounded)."""
+    if not text:
+        return ""
+    return text[-limit:]
+
+
 def _execute(
     cmd: list[str],
     *,
@@ -34,9 +43,12 @@ def _execute(
     env: dict[str, str] | None,
     cwd: str | None,
 ) -> str:
+    redacted = dlog.redact_argv(cmd)
     if _is_dry_run():
         print(f"dry-run: {' '.join(shlex.quote(c) for c in cmd)}")
+        dlog.debug("exec_dry_run", argv=redacted, cwd=cwd)
         return ""
+    started = time.monotonic()
     try:
         proc = subprocess.run(
             cmd,
@@ -47,12 +59,28 @@ def _execute(
             cwd=cwd,
         )
     except FileNotFoundError:
+        dlog.error(
+            "exec_failed",
+            argv=redacted,
+            cwd=cwd,
+            error="binary not found",
+        )
         raise DockerError(f"binary not found; cannot run: {' '.join(cmd)}")
+    duration_ms = int((time.monotonic() - started) * 1000)
     if proc.returncode != 0:
         detail = (proc.stderr or "").strip() or (proc.stdout or "").strip()
         if not detail and not capture:
             detail = "(output was streamed to the terminal above)"
+        dlog.error(
+            "exec_failed",
+            argv=redacted,
+            cwd=cwd,
+            exit_code=proc.returncode,
+            duration_ms=duration_ms,
+            output_tail=_tail(detail),
+        )
         raise DockerError(f"command failed (exit {proc.returncode}): {' '.join(cmd)}\n{detail}")
+    dlog.debug("exec_ok", argv=redacted, cwd=cwd, exit_code=0, duration_ms=duration_ms)
     return (proc.stdout or "").strip() if capture else ""
 
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 from dbctl.commands import dry, target_db
 from dbctl.config import Config
 from dbctl.errors import DatabaseError
+from dbctl import logging as dlog
 from dbctl.filestore import copy as filestore_copy
 from dbctl.postgres import (
     clone_database,
@@ -37,32 +38,40 @@ def run(
             f"template database '{source}' does not exist - create it first "
             "(e.g. 'docker compose run --rm --no-deps {svc} odoo -d {source} -i base --stop-after-init')"
         )
+    dlog.info("create_start", db=db, source=source, branch=branch, no_seed=no_seed, no_upgrade=no_upgrade)
 
     strategy = get_strategy(cfg)
     previous = strategy.current_database()
 
     # Cloning requires ZERO connections on the template: the Odoo service
     # keeps a pool open, so it must be stopped first.
+    dlog.info("create_phase", phase="stop", db=db)
     strategy.stop()
+    dlog.info("create_phase", phase="terminate_connections", source=source)
     terminate_connections(cfg, source)
 
     try:
+        dlog.info("create_phase", phase="clone", source=source, target=db)
         clone_database(cfg, source, db)
     except Exception:
         # Never leave a partial clone behind.
         if database_exists(cfg, db):
             try:
+                dlog.warning("create_phase", phase="cleanup_partial_clone", db=db)
                 drop_database(cfg, db)
             except Exception:
                 pass
         raise
 
+    dlog.info("create_phase", phase="filestore", source=source, target=db)
     filestore_result = filestore_copy(cfg, source, db)
+    dlog.info("create_phase", phase="sanitize", db=db)
     sanitize(cfg, db)
 
     seeds_ran: list[str] = []
     if not no_seed:
         seeds_ran = run_seeds(cfg, db, branch)
+    dlog.info("create_phase", phase="seeds", db=db, files=seeds_ran)
 
     # The database should be born with THIS branch's schema: apply the
     # modules changed since the base ref (detection, plan: M12). Runs
@@ -87,6 +96,15 @@ def run(
                         m for m in detection["modules"] if m not in installed
                     ]
                 if to_upgrade or to_install:
+                    dlog.info(
+                        "create_phase",
+                        phase="upgrade",
+                        db=db,
+                        modules=to_upgrade,
+                        install=to_install,
+                        base_ref=detection["base_ref"],
+                        base_sha=detection["base_sha"],
+                    )
                     strategy.apply_schema(db, to_upgrade, to_install)
                     upgrade_info = {
                         "modules": to_upgrade,
@@ -95,6 +113,12 @@ def run(
                         "base_sha": detection["base_sha"],
                     }
         except Exception as exc:  # detection must not break `create`
+            dlog.warning(
+                "create_phase",
+                phase="detection_skipped",
+                db=db,
+                error=str(exc),
+            )
             upgrade_info = {"error": str(exc)}
 
     if use:
@@ -106,6 +130,8 @@ def run(
     else:
         strategy.start(None)
         served = None  # back to the base config
+
+    dlog.info("create_phase", phase="start", db=served if served else "base")
 
     return {
         "db": db,

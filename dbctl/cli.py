@@ -8,12 +8,15 @@ from __future__ import annotations
 
 import os
 import re
+import sys
+import time
 import traceback
 from pathlib import Path
 
 import typer
 
 from dbctl import __version__
+from dbctl import logging as dlog
 from dbctl.commands import (
     create as create_cmd,
     drop as drop_cmd,
@@ -37,6 +40,26 @@ app = typer.Typer(
     add_completion=False,
     help="One Odoo database per git branch - agnostic, Docker-based.",
 )
+
+
+def _command_name(argv: list[str]) -> str:
+    """First subcommand token, skipping global options and their values.
+
+    Handles `dbctl --config x status`, `dbctl hook post-checkout` (-> hook),
+    `dbctl -v status`, `dbctl --version` (-> root).
+    """
+    skip_value = False
+    for token in argv[1:]:
+        if skip_value:
+            skip_value = False
+            continue
+        if token in ("--project", "-p", "--config"):
+            skip_value = True
+            continue
+        if token.startswith("-"):
+            continue
+        return token
+    return "root"
 
 
 @app.callback()
@@ -64,6 +87,9 @@ def _main(
         typer.echo(f"dbctl {__version__}")
         raise typer.Exit()
     ctx.obj = {"verbose": verbose, "project": project, "config": config}
+    log_path = dlog.init(_command_name(sys.argv))
+    if verbose and log_path:
+        typer.echo(f"log: {log_path}", err=True)
 
 
 # --------------------------------------------------------------------------
@@ -89,23 +115,43 @@ def _load_config(ctx: typer.Context, *, quiet: bool = False) -> Config:
     if not quiet:
         for warning in cfg.warnings:
             typer.echo(f"warning: {warning}", err=True)
+    dlog.set_context(project_root=str(cfg.project_root), config=str(cfg.path))
     return cfg
 
 
 def _run(ctx: typer.Context, fn) -> None:
     verbose: bool = ctx.obj["verbose"]
+    started = time.monotonic()
     try:
         fn()
     except DbctlError as exc:
+        dlog.error(
+            "command_failed",
+            error_type=type(exc).__name__,
+            message=str(exc),
+            exit_code=exc.exit_code,
+            duration_ms=int((time.monotonic() - started) * 1000),
+        )
         if verbose:
             traceback.print_exc()
         typer.echo(f"Error: {exc}", err=True)
         raise typer.Exit(exc.exit_code) from exc
     except Exception as exc:  # unexpected - still no raw traceback unless -v
+        dlog.log_exception(
+            "command_crashed",
+            error_type=type(exc).__name__,
+            message=str(exc),
+            duration_ms=int((time.monotonic() - started) * 1000),
+        )
         if verbose:
             traceback.print_exc()
         typer.echo(f"Error: unexpected {type(exc).__name__}: {exc}", err=True)
         raise typer.Exit(1) from exc
+    else:
+        dlog.info(
+            "command_ok",
+            duration_ms=int((time.monotonic() - started) * 1000),
+        )
 
 
 def _ask(message: str) -> bool:
@@ -481,6 +527,11 @@ def hook_post_checkout(
         for line in hook_cmd.on_checkout(cfg, prev, new, branch_flag):
             typer.echo(line, err=True)
     except Exception as exc:
+        dlog.log_exception(
+            "hook_crashed",
+            error_type=type(exc).__name__,
+            message=str(exc),
+        )
         typer.echo(f"dbctl: hook failed: {exc}", err=True)
     raise typer.Exit(0)
 

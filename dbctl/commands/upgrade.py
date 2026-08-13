@@ -12,6 +12,7 @@ AND uncommitted). Modules detected but not installed in the database go to
 from __future__ import annotations
 
 from dbctl import modules as modules_detect
+from dbctl import logging as dlog
 from dbctl.commands import dry, target_db
 from dbctl.config import Config
 from dbctl.errors import ConfigError, DatabaseError
@@ -45,6 +46,13 @@ def run(
         use_detect = cfg.modules.detect if detect is None else detect
         if use_detect:
             detection = modules_detect.detect(cfg)
+            dlog.info(
+                "detection",
+                base_ref=detection["base_ref"],
+                base_sha=detection["base_sha"],
+                modules=detection["modules"],
+                unmatched=detection["unmatched"],
+            )
             if detection["modules"]:
                 installed = installed_modules(cfg, db)
                 if installed is None or not cfg.modules.install_new:
@@ -56,8 +64,21 @@ def run(
                     install_modules = [
                         m for m in detection["modules"] if m not in installed
                     ]
+                dlog.info(
+                    "upgrade_plan",
+                    db=db,
+                    modules=upgrade_modules,
+                    install=install_modules,
+                    reason="detected",
+                )
             elif detection["changed_paths"]:
                 # Files changed, but none maps to a module (e.g. README).
+                dlog.info(
+                    "upgrade_nothing",
+                    db=db,
+                    reason="no module changed",
+                    changed_paths=detection["changed_paths"],
+                )
                 return {
                     "db": db,
                     "nothing": True,
@@ -69,7 +90,19 @@ def run(
                 # branch): fall back to the configured default modules.
                 if cfg.odoo.default_modules:
                     upgrade_modules = cfg.odoo.default_modules
+                    dlog.info(
+                        "upgrade_plan",
+                        db=db,
+                        modules=upgrade_modules,
+                        install=[],
+                        reason="nothing changed; default_modules fallback",
+                    )
                 else:
+                    dlog.info(
+                        "upgrade_nothing",
+                        db=db,
+                        reason="nothing changed",
+                    )
                     return {
                         "db": db,
                         "nothing": True,

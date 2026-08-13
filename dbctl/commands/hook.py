@@ -19,6 +19,7 @@ from pathlib import Path
 from dbctl.commands import use
 from dbctl.config import Config
 from dbctl.errors import DbctlError, GitError
+from dbctl import logging as dlog
 from dbctl.naming import database_name
 from dbctl.postgres import database_exists
 from dbctl.project import current_branch, hooks_dir
@@ -125,14 +126,27 @@ def on_checkout(cfg: Config, prev: str, new: str, branch_flag: str) -> list[str]
     """
     messages: list[str] = []
     try:
+        dlog.info(
+            "hook_checkout",
+            prev=prev,
+            new=new,
+            branch_flag=branch_flag,
+            enabled=cfg.hooks.enabled,
+        )
         if branch_flag != "1":
+            dlog.debug("hook_skipped", reason="file checkout (branch_flag=0)")
             return messages
         if not cfg.hooks.enabled:
+            dlog.debug("hook_skipped", reason="hooks disabled")
             return messages
 
         try:
             branch = current_branch(cfg.project_root)
         except GitError:
+            dlog.warning(
+                "hook_detached",
+                reason="detached HEAD - leaving the current database as is",
+            )
             messages.append(
                 "dbctl: detached HEAD - leaving the current database as is "
                 "(rebase/bisect?)"
@@ -142,16 +156,24 @@ def on_checkout(cfg: Config, prev: str, new: str, branch_flag: str) -> list[str]
         target = database_name(branch, cfg.postgres.db_prefix)
         strategy = get_strategy(cfg)
         if strategy.current_database() == target:
+            dlog.debug("hook_served", db=target, reason="already serving")
             messages.append(f"dbctl: already serving {target}")
             return messages
         if not database_exists(cfg, target):
+            dlog.warning(
+                "hook_db_missing",
+                db=target,
+                reason="run 'dbctl create --use' when ready",
+            )
             messages.append(
                 f"dbctl: database {target} does not exist yet - run "
                 "'dbctl create --use' when ready"
             )
             return messages
         use.run(cfg)
+        dlog.info("hook_serving", db=target)
         messages.append(f"dbctl: serving {target}")
     except Exception as exc:  # golden rule: never break the checkout
+        dlog.error("hook_failed", error_type=type(exc).__name__, message=str(exc))
         messages.append(f"dbctl: hook failed: {exc}")
     return messages
