@@ -32,8 +32,9 @@ e o mapeamento caminho → módulo vira um módulo de serviço novo, testável.
 ### 1. `dbctl/project.py` — plumbing de git (reusa `docker.run`, como as funções atuais)
 
 - `default_base_ref(root) -> str` — cadeia de fallback, agnóstica de projeto:
-  `[modules].base_ref` da config → `git symbolic-ref --short refs/remotes/origin/HEAD` → primeira que
-  existir entre `main`, `master`, `develop`. Nenhuma encontrada → `ConfigError` pedindo
+  `[modules].base_ref` da config → `origin/HEAD` (via `git for-each-ref --format=%(symref)`,
+  silencioso quando ausente) → primeira que existir entre `main`, `master`, `develop`. Nenhuma
+  encontrada → `ConfigError` pedindo
   `[modules].base_ref` explicitamente.
 - `merge_base(root, ref) -> str` — `git merge-base HEAD <ref>`. Falha (clone shallow, ref inexistente)
   → `GitError` com mensagem explicando que a detecção precisa do histórico da base.

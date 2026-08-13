@@ -34,8 +34,9 @@ mesmo parser estrito do `[hooks].enabled` (arquivo: TOML `true`/`false`; env: `1
 ### 13.3 Módulos
 
 - `project.py` — plumbing de git (via `docker.run`, regra de camadas intacta):
-  - `default_base_ref(root, configured=None) -> str` — `[modules].base_ref` → `git symbolic-ref
-    --short refs/remotes/origin/HEAD` → primeira entre `main`/`master`/`develop`. Nenhuma →
+  - `default_base_ref(root, configured=None) -> str` — `[modules].base_ref` → `origin/HEAD` (lido
+    com `git for-each-ref --format=%(symref)`, silencioso quando o ref não existe) → primeira entre
+    `main`/`master`/`develop`. Nenhuma →
     `ConfigError` pedindo `base_ref`.
   - `merge_base(root, ref) -> str` — `git merge-base HEAD <ref>`. Falha (clone shallow/ref
     inexistente) → `GitError` sugerindo `-m` ou `--no-detect`.

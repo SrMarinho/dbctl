@@ -199,12 +199,26 @@ def default_base_ref(root: Path, configured: str | None = None) -> str:
     if configured:
         return configured
     try:
+        # for-each-ref (not symbolic-ref): exits 0 with empty output when
+        # origin/HEAD is missing or not symbolic, so the routine fallback
+        # does not log exec_failed errors on every run.
         out = run(
-            ["git", "-C", str(root), "symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
+            [
+                "git",
+                "-C",
+                str(root),
+                "for-each-ref",
+                "--format=%(symref)",
+                "refs/remotes/origin/HEAD",
+            ],
             capture=True,
         )
         if out.strip():
-            return out.strip()
+            ref = out.strip()
+            for prefix in ("refs/remotes/", "refs/heads/"):
+                if ref.startswith(prefix):
+                    return ref[len(prefix) :]
+            return ref
     except DockerError:
         pass
     for candidate in ("main", "master", "develop"):
