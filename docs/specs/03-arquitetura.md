@@ -36,6 +36,7 @@ casca fina: faz parsing de argumentos e formata saída, **nunca contém regra de
     __main__.py            # entrypoint: `python -m dbctl`
     cli.py                 # Typer app
     errors.py              # exceções tipadas + exit codes
+    logging.py             # log estruturado JSONL (canal de diagnóstico)
     config.py              # carrega e valida .dbctl.toml
     project.py             # descoberta da raiz do projeto + git
     naming.py              # branch -> nome de banco

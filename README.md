@@ -128,6 +128,51 @@ Casos de borda: na branch base, nada é detectado (cai em `default_modules`);
 clone shallow → erro explicando que falta histórico; arquivos fora de módulos
 (`docker-compose.yml`, README) são ignorados (visíveis com `--verbose`).
 
+## Logs estruturados (JSONL)
+
+Cada execução do dbctl grava um log **estruturado** (JSON Lines) em
+`<repo>/logs/dbctl-YYYY-MM-DD.jsonl` — uma linha por evento, schema plano:
+
+```json
+{"ts":"2026-08-13T14:34:00.369+00:00","run":"20260813T143400.367",
+ "level":"error","event":"command_failed","command":"status",
+ "error_type":"GitError","message":"'/tmp' is not inside a git repository...",
+ "exit_code":4,"duration_ms":2}
+```
+
+Por que JSONL e não texto puro: um modelo (ou `jq`) consome eventos sem
+ambiguidade de parsing — timestamp ISO-8601 UTC, `run_id` para correlacionar
+uma execução inteira, `level`/`event`/`command` fixos e campos por evento.
+O console (Typer) continua sendo o canal humano; o arquivo é o canal de
+diagnóstico.
+
+O que é logado:
+- `invocation` / `command_ok` / `command_failed` / `command_crashed` — cada
+  comando, com argv, cwd, resultado, exit code e duração (traceback completo
+  nos crashes);
+- `exec_ok` / `exec_failed` / `exec_dry_run` — **todo comando docker/git**,
+  com argv, duração e tail do erro (até 4000 chars);
+- `detection` / `upgrade_plan` / `upgrade_nothing` — decisões da detecção de
+  módulos (base_ref, sha, módulos, unmatched);
+- `create_phase` — cada fase do create (stop, clone, filestore, sanitize,
+  seeds, upgrade, start);
+- `hook_checkout` / `hook_serving` / `hook_failed` — decisões do hook.
+
+Segredos são **redigidos** antes de gravar: flags `-e KEY=value` do
+`docker exec` viram `KEY=***` (o PGPASSWORD nunca aparece no log).
+
+Uso no loop de engenharia:
+
+```bash
+tail -f logs/dbctl-*.jsonl
+jq 'select(.level=="error")' logs/dbctl-*.jsonl | tail
+jq 'select(.event=="command_failed")' logs/dbctl-*.jsonl | tail -1
+jq --arg run "20260813T143400" 'select(.run==$run)' logs/dbctl-*.jsonl   # uma execução
+```
+
+- `DBCTL_LOG_DIR=/caminho` muda o diretório (default: `logs/` do repo; fallback `~/.dbctl/logs`).
+- `logs/` é gitignored.
+
 ## Hook post-checkout (opcional, Caso 3.1)
 
 Quer trocar de branch sem digitar `dbctl use`? Instale o hook uma vez:

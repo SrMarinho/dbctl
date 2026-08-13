@@ -6,6 +6,32 @@
 Para cada módulo: responsabilidade, API pública e regras. Assinaturas são orientativas — o
 implementador pode ajustar tipos, desde que mantenha a fronteira de responsabilidade.
 
+### `logging.py`
+Log **estruturado JSONL** — o canal de diagnóstico para loops de engenharia
+(modelos lendo o log para melhorar o projeto). O console (Typer) segue sendo
+o canal humano; o arquivo é máquina-legível de propósito.
+
+- Arquivo por dia: `<log_dir>/dbctl-YYYY-MM-DD.jsonl`, uma linha = um evento.
+  `log_dir`: `DBCTL_LOG_DIR` (env) → `<repo do tool>/logs` → `~/.dbctl/logs`
+  (fallback). A pasta `logs/` é gitignored.
+- Schema plano (snake_case): `ts` (ISO-8601 UTC), `run` (id da invocação,
+  correlaciona todos os eventos de uma execução), `level` (debug/info/
+  warning/error), `event`, `command`, contexto persistente (project_root,
+  config) e campos por evento. Sem filtro de nível: o leitor filtra com `jq`.
+- API: `init(command, **ctx) -> Path | None` (abre o arquivo do dia e grava
+  `invocation` com argv/cwd/pid), `set_context(**fields)`, `log(level, event,
+  **fields)` + helpers `debug/info/warning/error`, `log_exception()` (grava o
+  traceback), `redact_argv()` (mascara `-e KEY=value` → `KEY=***`).
+- **Segredos nunca são gravados**: todo argv passa por `redact_argv` antes de
+  logar (o PGPASSWORD do `docker exec` vira `***`).
+- Eventos principais: `invocation`/`command_ok`/`command_failed`/
+  `command_crashed` (cli), `exec_ok`/`exec_failed`/`exec_dry_run` (docker.py,
+  com duração e tail do erro), `detection`/`upgrade_plan`/`upgrade_nothing`,
+  `create_phase` (stop, clone, filestore, sanitize, seeds, upgrade, start),
+  `hook_checkout`/`hook_serving`/`hook_failed`/`hook_skipped`.
+- Só biblioteca padrão (json/os/sys/threading/traceback/datetime/pathlib) —
+  nenhuma dependência nova.
+
 ### `errors.py`
 Exceções tipadas, todas herdando de `DbctlError`, cada uma com um `exit_code`:
 
