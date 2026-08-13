@@ -216,6 +216,21 @@ nunca faz o checkout falhar — config ausente, Docker fora do ar, banco
 inexistente e HEAD destacado viram avisos `dbctl:` e o checkout sempre
 conclui com exit 0.
 
+**Trabalho não commitado nunca se perde.** Se o working tree estiver sujo no
+momento do checkout, o hook guarda as mudanças num stash nomeado e
+recuperável:
+
+```
+dbctl: working tree sujo (<prev>): mudanças guardadas em stash 'dbctl-wip <prev> 2026-08-13 14:26' — 'git stash pop' para recuperar
+```
+
+O stash inclui arquivos não rastreados (`git stash push -u`) e o working tree
+chega limpo na branch nova — o banco servido corresponde exatamente ao código
+commitado dela. Para recuperar o trabalho: `git stash list` (ache o
+`dbctl-wip`) e `git stash pop`. Isso nunca roda em estados de rebase/bisect
+(HEAD destacado). Para desligar: `[hooks] stash_dirty = false` no
+`.dbctl.toml` (ou `DBCTL_HOOKS_STASH_DIRTY=0`).
+
 Para desligar temporariamente sem desinstalar: `[hooks] enabled = false` no
 `.dbctl.toml` (ou `DBCTL_HOOKS_ENABLED=0` na sessão). Se já existir um
 `post-checkout` de terceiros, o `install` recusa com a linha `exec` para colar

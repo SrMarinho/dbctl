@@ -14,15 +14,17 @@ from __future__ import annotations
 import os
 import shutil
 import sys
+from datetime import datetime
 from pathlib import Path
 
 from dbctl import logging as dlog
 from dbctl.commands import use
 from dbctl.config import Config
-from dbctl.errors import DbctlError, GitError
+from dbctl.docker import run
+from dbctl.errors import DbctlError, DockerError, GitError
 from dbctl.naming import database_name
 from dbctl.postgres import database_exists
-from dbctl.project import current_branch, hooks_dir
+from dbctl.project import current_branch, hooks_dir, working_tree_dirty
 from dbctl.strategies import get_strategy
 
 SCRIPT_NAME = "post-checkout"
@@ -49,6 +51,38 @@ def _is_ours(path: Path) -> bool:
 
 def _script(cfg: Config) -> str:
     return f"#!/bin/sh\n{MARKER} (dbctl hook install)\n{_exec_line(cfg)}\n"
+
+
+def _stash_dirty(cfg: Config, prev: str) -> str | None:
+    """Guard uncommitted changes in a stash right after a branch checkout.
+
+    Returns a user-facing message when something was stashed (or would be,
+    in dry-run), None when the tree is clean. Never raises: the hook golden
+    rule (a checkout must never break) applies to this step too.
+
+    The stash is the safety net against losing work while switching
+    branches: the checkout already moved the changes to the new branch, so
+    they are parked (with -u, untracked files included) under a named,
+    recoverable stash instead of silently riding along or being overwritten
+    later. Recover with `git stash pop`.
+    """
+    if os.environ.get("DBCTL_DRY_RUN") == "1":
+        return f"dry-run: working tree sujo — guardaria as mudanças em stash 'dbctl-wip {prev}'"
+    try:
+        if not working_tree_dirty(cfg.project_root):
+            return None
+        stamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+        message = f"dbctl-wip {prev} {stamp}"
+        run(
+            ["git", "-C", str(cfg.project_root), "stash", "push", "-u", "-m", message],
+            capture=True,
+        )
+        return (
+            f"working tree sujo ({prev}): mudanças guardadas em stash '{message}' — "
+            "'git stash pop' para recuperar"
+        )
+    except DockerError as exc:
+        return f"não consegui guardar mudanças do working tree: {exc}"
 
 
 def install(cfg: Config, *, force: bool = False) -> dict:
@@ -146,6 +180,16 @@ def on_checkout(cfg: Config, prev: str, new: str, branch_flag: str) -> list[str]
                 "dbctl: detached HEAD - leaving the current database as is (rebase/bisect?)"
             )
             return messages
+
+        # No-data-loss net: park uncommitted changes in a named stash so work
+        # never rides along silently nor gets overwritten. Runs only for
+        # normal branch checkouts (detached HEAD returned above), so a
+        # rebase/bisect state is never touched.
+        if cfg.hooks.stash_dirty:
+            stashed = _stash_dirty(cfg, prev)
+            if stashed:
+                dlog.info("hook_stash", prev=prev, detail=stashed)
+                messages.append(f"dbctl: {stashed}")
 
         target = database_name(branch, cfg.postgres.db_prefix)
         strategy = get_strategy(cfg)

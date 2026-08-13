@@ -58,6 +58,9 @@ override_file = "docker-compose.override.yaml"   # só para compose-override
 [hooks]
 enabled = true                           # opcional, default true; false desliga o post-checkout
                                           # sem desinstalá-lo (ver [casos de uso](06-casos-de-uso.md), `dbctl hook`)
+stash_dirty = true                       # opcional, default true; no checkout com working tree sujo,
+                                          # guarda as mudanças num stash 'dbctl-wip <prev> <data>'
+                                          # (recuperar com `git stash pop`); false deixa o tree como está
 
 # Escape hatch — só quando kind = "custom".
 # Placeholders disponíveis: {db}, {modules}, {project_root}
@@ -87,6 +90,10 @@ problemática e o caminho do arquivo:
 8. `hooks.enabled` aceita apenas os literais booleanos reconhecidos (arquivo: `true`/`false` do TOML;
    env var: `1/true/yes/on` e `0/false/no/off`, case-insensitive). Valor não reconhecido → erro
    apontando a chave. Bloco `[hooks]` ausente é equivalente a `enabled = true`.
+9. `hooks.stash_dirty` segue as mesmas regras booleanas (default `true`). Quando ativo, o
+   `post-checkout` guarda num stash nomeado (`dbctl-wip <prev> <data>`, com `-u`) qualquer mudança
+   não commitada do working tree — a rede de segurança contra perda de código ao trocar de branch.
+   Nunca roda com HEAD destacado (rebase/bisect).
 
 ### 5.3 Overrides por variável de ambiente
 

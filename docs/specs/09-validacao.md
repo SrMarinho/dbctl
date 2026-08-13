@@ -62,6 +62,7 @@ leitura (`dbctl status`), nunca para criar, dropar ou reiniciar serviços.
 | V17 | `dbctl drop --yes` | Banco e filestore somem; `sandbox_base` intacto |
 | V18 | `dbctl drop --db sandbox_base` | **Recusa**, exit 6, por não ter o prefixo |
 | V19 | `dbctl reset --yes` | Banco volta ao estado do template |
+| V40 | Criar arquivo não commitado, `git checkout` para outra branch (hook instalado) | `dbctl: working tree sujo ... guardadas em stash 'dbctl-wip ...'`; o arquivo some do tree; `git stash pop` restaura o conteúdo; HEAD destacado nunca stasheia |
 
 ### 10.4 Isolamento entre branches — **o teste que valida a razão de existir do tool**
 

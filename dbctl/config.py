@@ -64,6 +64,7 @@ class StrategyConfig:
 @dataclass
 class HooksConfig:
     enabled: bool = True
+    stash_dirty: bool = True  # post-checkout stashes uncommitted changes (no data loss)
 
 
 @dataclass
@@ -256,18 +257,21 @@ def load_config(project_root: Path, config_path: Path) -> Config:
         )
 
     # --- [hooks] ---------------------------------------------------------
-    env_enabled = _env("hooks", "enabled")
-    if env_enabled is not None:
-        enabled = _parse_bool(env_enabled, "DBCTL_HOOKS_ENABLED")
-    else:
-        raw_enabled = data.get("hooks", {}).get("enabled", True)
-        if not isinstance(raw_enabled, bool):
+    def _hook_bool(key: str, default: bool) -> bool:
+        env_value = _env("hooks", key)
+        if env_value is not None:
+            return _parse_bool(env_value, f"DBCTL_HOOKS_{key.upper()}")
+        raw = data.get("hooks", {}).get(key, default)
+        if not isinstance(raw, bool):
             raise ConfigError(
-                f"invalid [hooks].enabled in {cfg_path}: expected a TOML "
-                f"boolean (true/false), got {raw_enabled!r}. "
-                "A missing [hooks] block is equivalent to enabled = true."
+                f"invalid [hooks].{key} in {cfg_path}: expected a TOML "
+                f"boolean (true/false), got {raw!r}. "
+                "A missing [hooks] block is equivalent to the defaults."
             )
-        enabled = raw_enabled
+        return raw
+
+    enabled = _hook_bool("enabled", True)
+    stash_dirty = _hook_bool("stash_dirty", True)
 
     # --- [modules] -------------------------------------------------------
     md_raw = data.get("modules", {})
@@ -321,7 +325,7 @@ def load_config(project_root: Path, config_path: Path) -> Config:
             override_file=override_file,
             commands=commands,
         ),
-        hooks=HooksConfig(enabled=enabled),
+        hooks=HooksConfig(enabled=enabled, stash_dirty=stash_dirty),
         modules=ModulesConfig(
             detect=detect_enabled,
             base_ref=base_ref_value,

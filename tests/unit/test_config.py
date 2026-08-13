@@ -115,6 +115,38 @@ def test_hooks_disabled_via_env(tmp_config, monkeypatch) -> None:
     assert cfg.hooks.enabled is False
 
 
+def test_hooks_stash_dirty_default_true(tmp_config) -> None:
+    cfg = load_config(tmp_config, tmp_config / ".dbctl.toml")
+    assert cfg.hooks.stash_dirty is True
+
+
+def test_hooks_stash_dirty_false(tmp_config) -> None:
+    (tmp_config / ".dbctl.toml").write_text(
+        '[postgres]\ncontainer="c"\nuser="u"\npassword="p"\ntemplate_db="t"\n'
+        '[odoo]\ncontainer="o"\ncompose_service="web"\n' + "[hooks]\nstash_dirty = false\n",
+        encoding="utf-8",
+    )
+    cfg = load_config(tmp_config, tmp_config / ".dbctl.toml")
+    assert cfg.hooks.stash_dirty is False
+    assert cfg.hooks.enabled is True  # independent key
+
+
+def test_hooks_stash_dirty_env(tmp_config, monkeypatch) -> None:
+    monkeypatch.setenv("DBCTL_HOOKS_STASH_DIRTY", "0")
+    cfg = load_config(tmp_config, tmp_config / ".dbctl.toml")
+    assert cfg.hooks.stash_dirty is False
+
+
+def test_hooks_stash_dirty_invalid(tmp_config) -> None:
+    (tmp_config / ".dbctl.toml").write_text(
+        '[postgres]\ncontainer="c"\nuser="u"\npassword="p"\ntemplate_db="t"\n'
+        '[odoo]\ncontainer="o"\ncompose_service="web"\n' + '[hooks]\nstash_dirty = "yes"\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(ConfigError, match=r"\[hooks\].stash_dirty"):
+        load_config(tmp_config, tmp_config / ".dbctl.toml")
+
+
 def test_modules_boolean_validation(tmp_config) -> None:
     (tmp_config / ".dbctl.toml").write_text(
         '[postgres]\ncontainer="c"\nuser="u"\npassword="p"\ntemplate_db="t"\n'

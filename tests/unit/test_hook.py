@@ -141,3 +141,85 @@ def test_on_checkout_delegates_to_use(git_repo, make_config, monkeypatch) -> Non
     messages = hook_cmd.on_checkout(cfg, "main", "feature", "1")
     assert used == ["use"]
     assert any("serving" in m for m in messages)
+
+
+def _cfg_clean(git_repo, tmp_path, make_config):
+    """Config file outside the repo: the working tree stays really clean."""
+    return make_config(root=git_repo, config=tmp_path / "cfg.toml")
+
+
+# --- stash automático de working tree sujo -----------------------------------
+
+
+def test_on_checkout_stashes_dirty_tree(git_repo, make_config, tmp_path, monkeypatch) -> None:
+    cfg = _cfg_clean(git_repo, tmp_path, make_config)
+    monkeypatch.setattr("dbctl.commands.hook.database_exists", lambda c, db: False)
+    (git_repo / "wip.txt").write_text("work in progress\n", encoding="utf-8")
+    (git_repo / "untracked.txt").write_text("new file\n", encoding="utf-8")
+
+    messages = hook_cmd.on_checkout(cfg, "main", "feature", "1")
+
+    assert any("stash" in m and "dbctl-wip main" in m for m in messages)
+    # The changes really are parked in a named, recoverable stash.
+    import subprocess
+
+    listing = subprocess.run(
+        ["git", "-C", str(git_repo), "stash", "list"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    assert "dbctl-wip main" in listing
+    # And the working tree is clean again (the new branch DB matches the code):
+    # the untracked wip.txt went into the stash too (-u flag).
+    assert not (git_repo / "wip.txt").exists()
+
+
+def test_on_checkout_clean_tree_no_stash(git_repo, make_config, tmp_path, monkeypatch) -> None:
+    cfg = _cfg_clean(git_repo, tmp_path, make_config)
+    monkeypatch.setattr("dbctl.commands.hook.database_exists", lambda c, db: False)
+    messages = hook_cmd.on_checkout(cfg, "main", "feature", "1")
+    assert not any("stash" in m for m in messages)
+
+
+def test_on_checkout_stash_disabled_keeps_tree(
+    git_repo, make_config, tmp_path, monkeypatch
+) -> None:
+    cfg = _cfg_clean(git_repo, tmp_path, make_config)
+    cfg.hooks.stash_dirty = False
+    monkeypatch.setattr("dbctl.commands.hook.database_exists", lambda c, db: False)
+    (git_repo / "wip.txt").write_text("work in progress\n", encoding="utf-8")
+    messages = hook_cmd.on_checkout(cfg, "main", "feature", "1")
+    assert not any("stash" in m for m in messages)
+    assert (git_repo / "wip.txt").exists()  # changes left alone
+
+
+def test_on_checkout_stash_failure_never_breaks(
+    git_repo, make_config, tmp_path, monkeypatch
+) -> None:
+    cfg = _cfg_clean(git_repo, tmp_path, make_config)
+    monkeypatch.setattr("dbctl.commands.hook.database_exists", lambda c, db: False)
+    (git_repo / "wip.txt").write_text("work in progress\n", encoding="utf-8")
+
+    from dbctl.errors import DockerError
+
+    def boom(*args, **kwargs):  # noqa: ANN001, ANN202
+        raise DockerError("git exploded")
+
+    monkeypatch.setattr("dbctl.commands.hook.run", boom)
+    # The stash step fails, but the checkout keeps going (golden rule).
+    messages = hook_cmd.on_checkout(cfg, "main", "feature", "1")
+    assert any("não consegui guardar" in m for m in messages)
+
+
+def test_on_checkout_detached_skips_stash(git_repo, make_config, tmp_path, monkeypatch) -> None:
+    cfg = _cfg_clean(git_repo, tmp_path, make_config)
+    monkeypatch.setattr("dbctl.commands.hook.database_exists", lambda c, db: False)
+    (git_repo / "wip.txt").write_text("work in progress\n", encoding="utf-8")
+    import subprocess
+
+    subprocess.run(["git", "-C", str(git_repo), "checkout", "-q", "--detach"], check=True)
+    messages = hook_cmd.on_checkout(cfg, "main", "HEAD", "1")
+    assert any("detached HEAD" in m for m in messages)
+    # Rebase/bisect states are never stashed (would corrupt the operation).
+    assert not any("stash" in m for m in messages)

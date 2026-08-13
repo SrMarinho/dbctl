@@ -138,7 +138,16 @@ falhas esperadas.
 #### `dbctl hook post-checkout <prev> <new> <branch_flag>` (oculto, chamado pelo git)
 - **Não é para uso manual** — é o comando que o script gerado por `hook install` invoca a cada
   `post-checkout`. Recebe os três argumentos padrão do hook do git.
-- **Passos:** `hook.on_checkout(cfg, prev, new, branch_flag)`.
+- **Passos:** `hook.on_checkout(cfg, prev, new, branch_flag)` — ordem de decisão:
+  1. `branch_flag != "1"` → nada (checkout de arquivo);
+  2. `hooks.enabled = false` → nada;
+  3. HEAD destacado → aviso `dbctl: detached HEAD ...` (rebase/bisect) e para — **nunca stasheia**;
+  4. `hooks.stash_dirty` (default true) e working tree sujo → `git stash push -u -m "dbctl-wip <prev> <data>"`
+     e avisa `dbctl: working tree sujo ... guardadas em stash ...` — a rede de segurança contra perda
+     de código; o tree chega limpo na branch nova;
+  5. já servindo o alvo → aviso `already serving <db>`;
+  6. banco do alvo inexistente → aviso sugerindo `dbctl create --use`;
+  7. senão → delega ao `use` (nunca reimplementa o override).
 - **Saída:** as linhas retornadas, prefixadas com `dbctl:`, em stderr.
 - **Sempre sai 0** — ver a regra de ouro em `commands/hook.py` ([módulos](05-modulos.md)). Nenhum cenário de erro pode
   fazer o `git checkout` do usuário falhar.
