@@ -67,6 +67,15 @@ class HooksConfig:
 
 
 @dataclass
+class ModulesConfig:
+    detect: bool = True  # auto-detect changed modules for `upgrade`
+    base_ref: str | None = None  # e.g. "origin/main"; None = auto-detect
+    manifest: str = "__manifest__.py"  # file marking a module root
+    install_new: bool = True  # detected-but-not-installed modules -> -i
+    ignore: list[str] = field(default_factory=list)  # globs that never trigger
+
+
+@dataclass
 class Config:
     project_root: Path  # git top-level: base of all relative paths
     path: Path  # the .dbctl.toml file itself (anywhere in the repo tree)
@@ -75,6 +84,7 @@ class Config:
     seeds: SeedsConfig
     strategy: StrategyConfig
     hooks: HooksConfig = field(default_factory=HooksConfig)
+    modules: ModulesConfig = field(default_factory=ModulesConfig)
     warnings: list[str] = field(default_factory=list)
 
     @property
@@ -258,6 +268,37 @@ def load_config(project_root: Path, config_path: Path) -> Config:
             )
         enabled = raw_enabled
 
+    # --- [modules] -------------------------------------------------------
+    md_raw = data.get("modules", {})
+
+    def _bool_key(key: str, env_name: str, default: bool) -> bool:
+        env_value = _env("modules", key)
+        if env_value is not None:
+            return _parse_bool(env_value, env_name)
+        raw = md_raw.get(key, default)
+        if not isinstance(raw, bool):
+            raise ConfigError(
+                f"invalid [modules].{key} in {cfg_path}: expected a TOML "
+                f"boolean (true/false), got {raw!r}"
+            )
+        return raw
+
+    detect_enabled = _bool_key("detect", "DBCTL_MODULES_DETECT", True)
+    install_new = _bool_key("install_new", "DBCTL_MODULES_INSTALL_NEW", True)
+
+    base_ref_value = _env("modules", "base_ref")
+    if base_ref_value is None and isinstance(md_raw.get("base_ref"), str):
+        base_ref_value = md_raw["base_ref"].strip() or None
+    manifest_value = _env("modules", "manifest") or str(
+        md_raw.get("manifest", "__manifest__.py")
+    )
+    env_ignore = _env("modules", "ignore")
+    if env_ignore is not None:
+        ignore = [part.strip() for part in env_ignore.split(",") if part.strip()]
+    else:
+        raw_ignore = md_raw.get("ignore", [])
+        ignore = list(raw_ignore) if isinstance(raw_ignore, list) else []
+
     return Config(
         project_root=root,
         path=cfg_path,
@@ -282,5 +323,12 @@ def load_config(project_root: Path, config_path: Path) -> Config:
             commands=commands,
         ),
         hooks=HooksConfig(enabled=enabled),
+        modules=ModulesConfig(
+            detect=detect_enabled,
+            base_ref=base_ref_value,
+            manifest=manifest_value,
+            install_new=install_new,
+            ignore=ignore,
+        ),
         warnings=warnings,
     )

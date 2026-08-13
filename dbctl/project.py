@@ -183,3 +183,76 @@ def working_tree_dirty(root: Path) -> bool:
     except DockerError:
         return False
     return bool(out.strip())
+
+
+# --------------------------------------------------------------------------
+# module-change detection plumbing (plan: auto-detect-changed-modules)
+# --------------------------------------------------------------------------
+
+def default_base_ref(root: Path, configured: str | None = None) -> str:
+    """Base ref for change detection, agnostic of project.
+
+    Fallback chain: ``[modules].base_ref`` (config) -> origin/HEAD ->
+    first existing among main/master/develop. None found -> ConfigError
+    asking for [modules].base_ref explicitly.
+    """
+    if configured:
+        return configured
+    try:
+        out = run(
+            ["git", "-C", str(root), "symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
+            capture=True,
+        )
+        if out.strip():
+            return out.strip()
+    except DockerError:
+        pass
+    for candidate in ("main", "master", "develop"):
+        try:
+            run(
+                ["git", "-C", str(root), "show-ref", "--verify", "--quiet", f"refs/heads/{candidate}"],
+                capture=True,
+            )
+            return candidate
+        except DockerError:
+            continue
+    raise ConfigError(
+        "could not determine the base branch for module-change detection: "
+        "there is no origin/HEAD and none of main/master/develop exists. "
+        "Set [modules].base_ref in .dbctl.toml (e.g. base_ref = \"origin/main\")."
+    )
+
+
+def merge_base(root: Path, ref: str) -> str:
+    """Merge-base SHA between HEAD and ``ref`` (committed AND uncommitted)."""
+    try:
+        out = run(
+            ["git", "-C", str(root), "merge-base", "HEAD", ref],
+            capture=True,
+        )
+    except DockerError as exc:
+        raise GitError(
+            f"could not compute merge-base with '{ref}' - module-change "
+            "detection needs the base branch history (shallow clone? missing "
+            "ref?). Use 'dbctl upgrade -m mod1,mod2' or '--no-detect'."
+        ) from exc
+    return out.strip()
+
+
+def changed_paths(root: Path, since: str) -> list[str]:
+    """Repo-relative paths changed since ``since``, deduped and sorted.
+
+    Union of `git diff --name-only <since>` (committed + working tree,
+    including staged) and `git ls-files --others --exclude-standard`
+    (untracked files - how a brand-new module appears before its first
+    commit).
+    """
+    paths: list[str] = []
+    out = run(["git", "-C", str(root), "diff", "--name-only", since], capture=True)
+    paths.extend(out.splitlines())
+    out = run(
+        ["git", "-C", str(root), "ls-files", "--others", "--exclude-standard"],
+        capture=True,
+    )
+    paths.extend(out.splitlines())
+    return sorted(dict.fromkeys(p for p in paths if p))
