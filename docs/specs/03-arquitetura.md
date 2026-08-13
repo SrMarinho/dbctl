@@ -28,9 +28,11 @@ casca fina: faz parsing de argumentos e formata saída, **nunca contém regra de
 ```
 ~/projects/dbctl/
   README.md
-  pyproject.toml
+  pyproject.toml              # deps: typer; dev: pre-commit + pytest
+  uv.lock                     # lock reproduzível (uv sync)
   .dbctl.example.toml
   .gitignore
+  .pre-commit-config.yaml     # ruff + mypy + pytest unit em todo commit
   dbctl/
     __init__.py            # versão apenas; sem imports pesados
     __main__.py            # entrypoint: `python -m dbctl`
@@ -62,6 +64,12 @@ casca fina: faz parsing de argumentos e formata saída, **nunca contém regra de
       drop.py
       reset.py
       hook.py              # instala/remove o post-checkout
+  tests/
+    conftest.py            # fixtures: docker/psql/compose fake, git real
+    run-all.sh             # unit + integração (Docker real)
+    unit/                  # 170+ testes: módulos, commands, CLI, regressão
+    integration/           # ciclo real no dbctl-sandbox (skip se indisponível)
+  docs/specs/              # o SPEC dividido por assunto (ver README.md lá)
 ```
 
 ### 4.3 Estrutura no projeto injetado

@@ -6,6 +6,15 @@
 Executar **inteiramente no sandbox**. O projeto `credsus` só pode ser tocado para um teste final de
 leitura (`dbctl status`), nunca para criar, dropar ou reiniciar serviços.
 
+> **Automação da regressão:** parte dos itens abaixo virou teste automatizado e roda em **todo
+> commit** via pre-commit (`pytest tests/unit`, hook `pytest (unit tests)`) ou com
+> `tests/run-all.sh` (unit + integração real no sandbox). Mapeamento aproximado:
+> V2/V3/C1-C8 → `test_cli.py`/`test_project.py`/`test_config.py`; V7-V9 → `test_naming.py`;
+> V12/V17/V34/V38/V39 → `test_commands.py`; V18 → `test_postgres.py`; V35 → `test_agnostic.py`.
+> O ciclo V10/V13/V19 (create/use/drop reais com Docker) é coberto por
+> `tests/integration/test_sandbox.py`, numa branch descartável que é dropada ao final.
+> Os itens que dependem do *drift* de schema entre branches (V20-V24) continuam manuais.
+
 ### 10.1 Descoberta e config
 
 | # | Ação | Resultado esperado |
