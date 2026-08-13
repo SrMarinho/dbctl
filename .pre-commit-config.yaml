@@ -28,3 +28,16 @@ repos:
         pass_filenames: false  # [tool.mypy] files = ["dbctl"] define the scope
         additional_dependencies:
           - typer>=0.12
+
+  - repo: local
+    hooks:
+      - id: pytest-unit
+        name: pytest (unit tests)
+        entry: .venv/bin/pytest
+        args: ["tests/unit", "-q"]
+        language: system
+        pass_filenames: false
+        always_run: true
+        description: >-
+          Unit + regression tests on every commit (integration tests need
+          Docker and run via `tests/run-all.sh` or `pytest tests -m integration`).

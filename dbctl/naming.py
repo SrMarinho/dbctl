@@ -28,8 +28,17 @@ def slugify(branch: str) -> str:
 
 
 def database_name(branch: str, prefix: str) -> str:
-    """Return the Postgres database name for ``branch`` under ``prefix``."""
+    """Return the Postgres database name for ``branch`` under ``prefix``.
+
+    Guarantees <= 63 chars even for an oversized prefix (defense in depth:
+    config validates the prefix, but callers must never produce an invalid
+    identifier).
+    """
     slug = slugify(branch)
     digest = hashlib.sha1(branch.encode("utf-8")).hexdigest()[:_DIGEST_LEN]
     budget = 63 - len(prefix) - _SEP_AND_DIGEST
+    if budget < 0:
+        # Trim the prefix so the digest (the disambiguator) always survives.
+        prefix = prefix[: 63 - _SEP_AND_DIGEST]
+        budget = 0
     return f"{prefix}{slug[:budget]}_{digest}"

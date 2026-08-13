@@ -11,13 +11,22 @@ Trocar de branch passa a ser: `git checkout <branch>` + `dbctl use`.
 
 ## Desenvolvimento
 
-Lint, formatação e tipos são garantidos por **pre-commit** (ruff + mypy):
+Lint, formatação, tipos e testes são garantidos por **pre-commit**
+(ruff + mypy + pytest):
 
 ```bash
-uv sync --extra dev     # instala o tool + pre-commit no .venv
+uv sync --extra dev     # instala o tool + pre-commit + pytest no .venv
 pre-commit install      # liga o hook de commit (já instalado no repo)
 pre-commit run --all-files
 ```
+
+O hook `pytest (unit tests)` roda a suíte unitária + regressão em **todo
+commit** (`tests/unit`): qualquer mudança que quebre o código impede o
+commit. A suíte de **integração** (`tests/integration`, real Docker +
+dbctl-sandbox: ciclo create/use/upgrade/drop numa branch descartável) roda
+com `tests/run-all.sh` ou `pytest tests -m integration` — é lenta e exige o
+ambiente, por isso fica fora do hook. O teste `tests/unit/test_agnostic.py`
+garante o invariante de agnosticismo (V35: zero strings de projeto no tool).
 
 Para o hook funcionar em qualquer shell, o `pre-commit` precisa estar no PATH:
 `uv tool install pre-commit` (uma vez) ou ative o venv (`source .venv/bin/activate`).
