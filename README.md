@@ -78,7 +78,9 @@ Todas as chaves do `.dbctl.toml` aceitam override por env var no padrão
 ```bash
 git checkout -b GC-700-nova-feature
 dbctl create --use        # clona o template, copia filestore, sanitiza, roda seeds, serve
-dbctl upgrade -m modulo   # aplica -u SÓ no banco desta branch
+# mexeu num model? aplique so no banco desta branch:
+dbctl upgrade     # detecta sozinho o que mudou desde a branch base
+# (ou explicite: dbctl upgrade -m faturamento)
 
 # alternar entre branches:
 git checkout GC-629-...   # o código troca (montado ao vivo no container)
@@ -92,6 +94,39 @@ dbctl list                # bancos do prefixo com tamanho
 dbctl drop                # remove banco + filestore (confirmação)
 dbctl unuse               # remove o override; o projeto volta à config base
 ```
+
+## Detecção automática de módulos alterados
+
+O banco da branch nasceu de um clone do template, que reflete a branch base —
+então **o que a branch mudou desde a base é exatamente o que precisa de `-u`**.
+Sem `-m`, o `dbctl upgrade` descobre isso sozinho:
+
+1. base = `[modules].base_ref` → `origin/HEAD` → `main`/`master`/`develop`;
+2. `git merge-base HEAD <base>` (pega commitado **e** não commitado);
+3. caminhos alterados → diretório com o manifesto (`__manifest__.py`, configurável);
+4. módulo detectado mas **não instalado** (pasta nova) → entra com `-i`, não `-u`.
+
+```bash
+dbctl upgrade                  # detecta e aplica
+dbctl upgrade --no-detect      # comportamento antigo (-m / default_modules)
+dbctl status                   # preview: linha "modules:" mostra o que seria
+                               # aplicado, sem executar nada
+dbctl create                   # o banco já nasce com o schema da branch
+```
+
+Configuração (`[modules]` no `.dbctl.toml`):
+
+| Chave | Default | Efeito |
+|---|---|---|
+| `detect` | `true` | `false` volta ao comportamento antigo |
+| `base_ref` | auto | branch base explícita (ex.: `"origin/main"`) |
+| `manifest` | `__manifest__.py` | o que marca a raiz de um módulo |
+| `install_new` | `true` | módulo novo → `-i`; `false` → `-u` (no-op silencioso) |
+| `ignore` | `[]` | globs que nunca disparam upgrade (ex.: `["**/static/**"]`) |
+
+Casos de borda: na branch base, nada é detectado (cai em `default_modules`);
+clone shallow → erro explicando que falta histórico; arquivos fora de módulos
+(`docker-compose.yml`, README) são ignorados (visíveis com `--verbose`).
 
 ## Hook post-checkout (opcional, Caso 3.1)
 
@@ -117,10 +152,10 @@ manualmente; `install --force` faz backup como `post-checkout.bak` e sobrescreve
 | Comando | O que faz |
 |---|---|
 | `status` | Relatório somente-leitura: branch, banco alvo, servido, seed da branch |
-| `create [--from T] [--no-seed] [--use]` | Clone do template + filestore + sanitize + seeds |
+| `create [--from T] [--no-seed] [--use] [--no-upgrade]` | Clone do template + filestore + sanitize + seeds + **schema da branch** |
 | `use` | Aponta o serviço para o banco da branch (`-d` + `--db-filter` no override) |
 | `unuse` | Remove o `docker-compose.override.yaml` (reversível) |
-| `upgrade [-m mod1,mod2] [--all]` | `-u` apenas no banco da branch (default: `odoo.default_modules`) |
+| `upgrade [-m mod1,mod2] [--all] [--no-detect]` | Aplica schema no banco da branch; sem `-m`, **detecta os módulos alterados** desde a branch base (`-i` para módulos novos) |
 | `seed` | Roda `base.py` e `branches/<slug>.py`, se existir |
 | `list` | Lista só os bancos com o `db_prefix`, com tamanho e marcações |
 | `drop [--yes] [--db NAME]` | Remove banco + filestore; **recusa** nome sem o prefixo |

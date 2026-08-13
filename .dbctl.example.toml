@@ -42,8 +42,18 @@ enabled = true                          # optional, default true; false disables
                                         # the post-checkout hook without
                                         # uninstalling it (`dbctl hook`)
 
+[modules]
+detect = true                           # optional, default true; false returns
+                                        # to the old -m/default_modules behavior
+# base_ref    = "origin/main"           # optional; default = origin/HEAD, then
+                                        # main/master/develop
+# manifest    = "__manifest__.py"       # optional; file marking a module root
+# install_new = true                    # optional; new module -> -i, not -u
+# ignore      = ["**/static/**"]        # optional; globs that never trigger
+                                        # an upgrade
+
 # Escape hatch - only when kind = "custom".
-# Placeholders available: {db}, {modules}, {project_root}
+# Placeholders available: {db}, {modules}, {install}, {project_root}
 # [strategy.commands]
 # start   = "..."
 # stop    = "..."

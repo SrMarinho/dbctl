@@ -154,6 +154,21 @@ def status(ctx: typer.Context) -> None:
         else:
             hook_line = "not installed"
         typer.echo(f"hook:        {hook_line}")
+        changed = info["changed_modules"]
+        if not changed["enabled"]:
+            typer.echo("modules:     detection disabled")
+        elif changed["error"]:
+            typer.echo(f"modules:     n/a ({changed['error']})")
+        elif changed["modules"]:
+            typer.echo(
+                f"modules:     {', '.join(changed['modules'])} "
+                f"(base: {changed['base_ref']} @ {changed['base_sha'][:8]})"
+            )
+        else:
+            typer.echo(
+                f"modules:     none changed "
+                f"(base: {changed['base_ref']} @ {changed['base_sha'][:8]})"
+            )
         if info["dirty"]:
             typer.echo(
                 "warning: working tree has uncommitted changes - the branch "
@@ -176,17 +191,43 @@ def create(
     use: bool = typer.Option(
         False, "--use", help="Serve the new database right away."
     ),
+    no_upgrade: bool = typer.Option(
+        False,
+        "--no-upgrade",
+        help="Skip applying the branch's changed modules after cloning.",
+    ),
 ) -> None:
-    """Clone the template into the branch database (filestore + sanitize + seeds)."""
+    """Clone the template into the branch database (filestore + sanitize + seeds + schema)."""
     def _do() -> None:
         cfg = _load_config(ctx)
         result = create_cmd.run(
-            cfg, template=from_template, no_seed=no_seed, use=use
+            cfg,
+            template=from_template,
+            no_seed=no_seed,
+            use=use,
+            no_upgrade=no_upgrade,
         )
         typer.echo(f"created {result['db']} from {result['source']}")
         typer.echo(f"filestore: {result['filestore']}")
         if result["seeds"]:
             typer.echo("seeds: " + ", ".join(result["seeds"]))
+        upgrade = result.get("upgrade")
+        if upgrade:
+            if upgrade.get("error"):
+                typer.echo(
+                    f"warning: module detection skipped: {upgrade['error']}",
+                    err=True,
+                )
+            else:
+                parts = []
+                if upgrade["modules"]:
+                    parts.append(f"-u {','.join(upgrade['modules'])}")
+                if upgrade["install"]:
+                    parts.append(f"-i {','.join(upgrade['install'])}")
+                typer.echo(
+                    f"schema:     {' '.join(parts)} "
+                    f"(base: {upgrade['base_ref']} @ {upgrade['base_sha'][:8]})"
+                )
         if result["served"]:
             url = _web_url(cfg)
             typer.echo(f"now serving {result['served']}" + (f" ({url})" if url else ""))
@@ -235,8 +276,13 @@ def upgrade(
     all_modules: bool = typer.Option(
         False, "--all", help="Upgrade all modules (-u all)."
     ),
+    detect: bool | None = typer.Option(
+        None,
+        "--detect/--no-detect",
+        help="Force/skip module-change detection (default: [modules].detect).",
+    ),
 ) -> None:
-    """Apply schema upgrades (-u) to the branch database only."""
+    """Apply schema changes to the branch database only (auto-detects changed modules)."""
     def _do() -> None:
         cfg = _load_config(ctx)
         module_list = (
@@ -245,9 +291,29 @@ def upgrade(
             else None
         )
         result = upgrade_cmd.run(
-            cfg, modules=module_list, all_modules=all_modules
+            cfg, modules=module_list, all_modules=all_modules, detect=detect
         )
-        typer.echo(f"upgraded {result['db']} with modules: {','.join(result['modules'])}")
+        if result.get("nothing"):
+            det = result.get("detection")
+            base = (
+                f" (base: {det['base_ref']} @ {det['base_sha'][:8]})"
+                if det
+                else ""
+            )
+            typer.echo(f"nothing to upgrade: {result['reason']}{base}")
+            return
+        det = result.get("detection")
+        if det:
+            typer.echo(
+                f"detected via {det['base_ref']} @ {det['base_sha'][:8]}: "
+                + (", ".join(det["modules"]) if det["modules"] else "none")
+            )
+        if result["modules"]:
+            typer.echo(
+                f"upgraded {result['db']} with modules: {','.join(result['modules'])}"
+            )
+        if result.get("install"):
+            typer.echo(f"installed new modules: {','.join(result['install'])}")
 
     _run(ctx, _do)
 
