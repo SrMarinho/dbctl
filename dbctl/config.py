@@ -195,7 +195,9 @@ def load_config(project_root: Path, config_path: Path) -> Config:
             f"invalid or incomplete configuration in {cfg_path}:\n"
             + "\n".join(f"  - {m}" for m in missing)
         )
-    compose_file = _env("odoo", "compose_file") or str(od_raw.get("compose_file", "docker-compose.yml"))
+    compose_file = _env("odoo", "compose_file") or str(
+        od_raw.get("compose_file", "docker-compose.yml")
+    )
     data_dir = _env("odoo", "data_dir") or str(od_raw.get("data_dir", "/var/lib/odoo"))
     default_modules = _split_list(_env("odoo", "default_modules"))
     if default_modules is None:
@@ -205,8 +207,7 @@ def load_config(project_root: Path, config_path: Path) -> Config:
     # --- [seeds] ---------------------------------------------------------
     sd_raw = data.get("seeds", {})
     seeds_configured = bool(sd_raw) or any(
-        os.environ.get(k)
-        for k in ("DBCTL_SEEDS_PATH", "DBCTL_SEEDS_MOUNT")
+        os.environ.get(k) for k in ("DBCTL_SEEDS_PATH", "DBCTL_SEEDS_MOUNT")
     )
     seeds_path_raw = _env("seeds", "path")
     if seeds_path_raw is None and sd_raw.get("path") is not None:
@@ -289,9 +290,7 @@ def load_config(project_root: Path, config_path: Path) -> Config:
     base_ref_value = _env("modules", "base_ref")
     if base_ref_value is None and isinstance(md_raw.get("base_ref"), str):
         base_ref_value = md_raw["base_ref"].strip() or None
-    manifest_value = _env("modules", "manifest") or str(
-        md_raw.get("manifest", "__manifest__.py")
-    )
+    manifest_value = _env("modules", "manifest") or str(md_raw.get("manifest", "__manifest__.py"))
     env_ignore = _env("modules", "ignore")
     if env_ignore is not None:
         ignore = [part.strip() for part in env_ignore.split(",") if part.strip()]

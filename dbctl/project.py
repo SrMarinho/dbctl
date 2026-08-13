@@ -73,8 +73,7 @@ def find_config(
         cfg_path = explicit.expanduser().resolve()
         if not cfg_path.is_file():
             raise ConfigError(
-                f"config file does not exist: {cfg_path} "
-                "(from --config or DBCTL_CONFIG)"
+                f"config file does not exist: {cfg_path} (from --config or DBCTL_CONFIG)"
             )
         if root_override is not None:
             return cfg_path, root_override.expanduser().resolve()
@@ -189,6 +188,7 @@ def working_tree_dirty(root: Path) -> bool:
 # module-change detection plumbing (plan: auto-detect-changed-modules)
 # --------------------------------------------------------------------------
 
+
 def default_base_ref(root: Path, configured: str | None = None) -> str:
     """Base ref for change detection, agnostic of project.
 
@@ -210,7 +210,15 @@ def default_base_ref(root: Path, configured: str | None = None) -> str:
     for candidate in ("main", "master", "develop"):
         try:
             run(
-                ["git", "-C", str(root), "show-ref", "--verify", "--quiet", f"refs/heads/{candidate}"],
+                [
+                    "git",
+                    "-C",
+                    str(root),
+                    "show-ref",
+                    "--verify",
+                    "--quiet",
+                    f"refs/heads/{candidate}",
+                ],
                 capture=True,
             )
             return candidate
@@ -219,7 +227,7 @@ def default_base_ref(root: Path, configured: str | None = None) -> str:
     raise ConfigError(
         "could not determine the base branch for module-change detection: "
         "there is no origin/HEAD and none of main/master/develop exists. "
-        "Set [modules].base_ref in .dbctl.toml (e.g. base_ref = \"origin/main\")."
+        'Set [modules].base_ref in .dbctl.toml (e.g. base_ref = "origin/main").'
     )
 
 

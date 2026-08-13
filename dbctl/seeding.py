@@ -44,9 +44,7 @@ def run_python(
             capture=True,
         )
     except DockerError as exc:
-        raise SeedError(
-            f"odoo shell failed on database '{db}' ({purpose}):\n{exc}"
-        ) from exc
+        raise SeedError(f"odoo shell failed on database '{db}' ({purpose}):\n{exc}") from exc
 
 
 def run_seeds(cfg: Config, db: str, branch: str) -> list[str]:

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from dbctl.commands import dry, target_db
 from dbctl.config import Config
 from dbctl.errors import DatabaseError, UserAbort
@@ -15,7 +17,7 @@ def run(
     *,
     yes: bool = False,
     db: str | None = None,
-    ask=None,
+    ask: Callable[[str], bool] | None = None,
 ) -> dict:
     if db is None:
         _, db = target_db(cfg)

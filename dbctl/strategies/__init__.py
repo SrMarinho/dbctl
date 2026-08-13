@@ -15,6 +15,5 @@ def get_strategy(cfg: Config) -> Strategy:
     if cfg.strategy.kind == "custom":
         return CustomStrategy(cfg)
     raise ConfigError(
-        f"unknown strategy kind '{cfg.strategy.kind}' "
-        "(valid: compose-override, custom)"
+        f"unknown strategy kind '{cfg.strategy.kind}' (valid: compose-override, custom)"
     )

@@ -6,6 +6,8 @@ by create with --use, so the fresh database ends up being served.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from dbctl.commands import create, dry, target_db
 from dbctl.config import Config
 from dbctl.errors import UserAbort
@@ -14,7 +16,7 @@ from dbctl.postgres import database_exists, drop_database
 from dbctl.strategies import get_strategy
 
 
-def run(cfg: Config, *, yes: bool = False, ask=None) -> dict:
+def run(cfg: Config, *, yes: bool = False, ask: Callable[[str], bool] | None = None) -> dict:
     branch, db = target_db(cfg)
     if not yes:
         if ask is None:

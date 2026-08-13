@@ -9,6 +9,21 @@ um banco (e filestore) por branch, criado por clone de um banco template.
 
 Trocar de branch passa a ser: `git checkout <branch>` + `dbctl use`.
 
+## Desenvolvimento
+
+Lint, formatação e tipos são garantidos por **pre-commit** (ruff + mypy):
+
+```bash
+uv tool install pre-commit     # uma vez
+pre-commit install             # liga o hook de commit (já instalado no repo)
+pre-commit run --all-files     # roda tudo manualmente
+```
+
+Configuração: `.pre-commit-config.yaml` + `[tool.ruff]`/`[tool.mypy]` no
+`pyproject.toml` (linha 100, regras E/F/W/I/UP/B/SIM/C4; mypy com
+`disallow_untyped_defs` etc.). Rodar localmente sem pre-commit:
+`ruff check dbctl && ruff format --check dbctl && mypy dbctl`.
+
 ## Instalação
 
 Requisitos: Python >= 3.11, Docker + Docker Compose v2, git. O tool **não**

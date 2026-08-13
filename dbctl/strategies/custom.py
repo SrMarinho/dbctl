@@ -8,14 +8,13 @@ code to the tool.
 
 from __future__ import annotations
 
-from dbctl.config import Config
 from dbctl.docker import run
 from dbctl.errors import ConfigError
 from dbctl.strategies.base import Strategy
 
 
 class CustomStrategy(Strategy):
-    def _run(self, template: str | None, **placeholders) -> None:
+    def _run(self, template: str | None, **placeholders: object) -> None:
         if not template:
             return
         filled = template.format(
@@ -38,8 +37,7 @@ class CustomStrategy(Strategy):
         template = self.cfg.strategy.commands.upgrade
         if not template:
             raise ConfigError(
-                "strategy.kind = 'custom' needs [strategy.commands].upgrade "
-                "for 'dbctl upgrade'"
+                "strategy.kind = 'custom' needs [strategy.commands].upgrade for 'dbctl upgrade'"
             )
         self._run(
             template,

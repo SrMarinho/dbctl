@@ -40,8 +40,7 @@ def copy(cfg: Config, source_db: str, target_db: str) -> str:
     src = _filestore_dir(cfg, source_db)
     dst = _filestore_dir(cfg, target_db)
     script = (
-        f'if [ -d "{src}" ]; then cp -a "{src}" "{dst}" && echo {_COPIED}; '
-        f'else echo {_MISSING}; fi'
+        f'if [ -d "{src}" ]; then cp -a "{src}" "{dst}" && echo {_COPIED}; else echo {_MISSING}; fi'
     )
     out = _run_in_service(cfg, ["sh", "-c", script], capture=True)
     if _MISSING in out:

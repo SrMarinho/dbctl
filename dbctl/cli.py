@@ -11,6 +11,7 @@ import re
 import sys
 import time
 import traceback
+from collections.abc import Callable
 from pathlib import Path
 
 import typer
@@ -19,14 +20,32 @@ from dbctl import __version__
 from dbctl import logging as dlog
 from dbctl.commands import (
     create as create_cmd,
+)
+from dbctl.commands import (
     drop as drop_cmd,
+)
+from dbctl.commands import (
     hook as hook_cmd,
+)
+from dbctl.commands import (
     list_dbs as list_cmd,
+)
+from dbctl.commands import (
     reset as reset_cmd,
+)
+from dbctl.commands import (
     seed as seed_cmd,
+)
+from dbctl.commands import (
     status as status_cmd,
+)
+from dbctl.commands import (
     unuse as unuse_cmd,
+)
+from dbctl.commands import (
     upgrade as upgrade_cmd,
+)
+from dbctl.commands import (
     use as use_cmd,
 )
 from dbctl.config import Config, load_config
@@ -65,9 +84,7 @@ def _command_name(argv: list[str]) -> str:
 @app.callback()
 def _main(
     ctx: typer.Context,
-    verbose: bool = typer.Option(
-        False, "--verbose", "-v", help="Show full tracebacks on errors."
-    ),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show full tracebacks on errors."),
     project: str | None = typer.Option(
         None,
         "--project",
@@ -79,9 +96,7 @@ def _main(
         "--config",
         help="Path to the .dbctl.toml (default: discovery, spec 5.0).",
     ),
-    version: bool = typer.Option(
-        False, "--version", help="Show the dbctl version and exit."
-    ),
+    version: bool = typer.Option(False, "--version", help="Show the dbctl version and exit."),
 ) -> None:
     if version:
         typer.echo(f"dbctl {__version__}")
@@ -96,15 +111,12 @@ def _main(
 # helpers
 # --------------------------------------------------------------------------
 
+
 def _load_config(ctx: typer.Context, *, quiet: bool = False) -> Config:
     """Resolve project root + config file (spec 5.0) and load the config."""
     opts = ctx.obj
     explicit = opts.get("config") or os.environ.get("DBCTL_CONFIG")
-    root_override = (
-        Path(opts["project"]).expanduser().resolve()
-        if opts.get("project")
-        else None
-    )
+    root_override = Path(opts["project"]).expanduser().resolve() if opts.get("project") else None
     start = root_override if root_override else Path.cwd()
     config_path, project_root = find_config(
         start,
@@ -119,7 +131,7 @@ def _load_config(ctx: typer.Context, *, quiet: bool = False) -> Config:
     return cfg
 
 
-def _run(ctx: typer.Context, fn) -> None:
+def _run(ctx: typer.Context, fn: Callable[[], None]) -> None:
     verbose: bool = ctx.obj["verbose"]
     started = time.monotonic()
     try:
@@ -176,9 +188,11 @@ def _web_url(cfg: Config) -> str | None:
 # commands
 # --------------------------------------------------------------------------
 
+
 @app.command()
 def status(ctx: typer.Context) -> None:
     """Show project, branch, target database and what is being served."""
+
     def _do() -> None:
         cfg = _load_config(ctx)
         info = status_cmd.run(cfg)
@@ -231,12 +245,8 @@ def create(
     from_template: str | None = typer.Option(
         None, "--from", help="Template database (default: postgres.template_db)."
     ),
-    no_seed: bool = typer.Option(
-        False, "--no-seed", help="Skip seeds after cloning."
-    ),
-    use: bool = typer.Option(
-        False, "--use", help="Serve the new database right away."
-    ),
+    no_seed: bool = typer.Option(False, "--no-seed", help="Skip seeds after cloning."),
+    use: bool = typer.Option(False, "--use", help="Serve the new database right away."),
     no_upgrade: bool = typer.Option(
         False,
         "--no-upgrade",
@@ -244,6 +254,7 @@ def create(
     ),
 ) -> None:
     """Clone the template into the branch database (filestore + sanitize + seeds + schema)."""
+
     def _do() -> None:
         cfg = _load_config(ctx)
         result = create_cmd.run(
@@ -286,6 +297,7 @@ def create(
 @app.command()
 def use(ctx: typer.Context) -> None:
     """Point the Odoo service at the branch database."""
+
     def _do() -> None:
         cfg = _load_config(ctx)
         result = use_cmd.run(cfg)
@@ -298,6 +310,7 @@ def use(ctx: typer.Context) -> None:
 @app.command()
 def unuse(ctx: typer.Context) -> None:
     """Remove the compose override; next `docker compose up` uses base config."""
+
     def _do() -> None:
         cfg = _load_config(ctx)
         result = unuse_cmd.run(cfg)
@@ -319,9 +332,7 @@ def upgrade(
     modules: str | None = typer.Option(
         None, "--modules", "-m", help="Comma-separated modules to upgrade."
     ),
-    all_modules: bool = typer.Option(
-        False, "--all", help="Upgrade all modules (-u all)."
-    ),
+    all_modules: bool = typer.Option(False, "--all", help="Upgrade all modules (-u all)."),
     detect: bool | None = typer.Option(
         None,
         "--detect/--no-detect",
@@ -329,23 +340,16 @@ def upgrade(
     ),
 ) -> None:
     """Apply schema changes to the branch database only (auto-detects changed modules)."""
+
     def _do() -> None:
         cfg = _load_config(ctx)
         module_list = (
-            [part.strip() for part in modules.split(",") if part.strip()]
-            if modules
-            else None
+            [part.strip() for part in modules.split(",") if part.strip()] if modules else None
         )
-        result = upgrade_cmd.run(
-            cfg, modules=module_list, all_modules=all_modules, detect=detect
-        )
+        result = upgrade_cmd.run(cfg, modules=module_list, all_modules=all_modules, detect=detect)
         if result.get("nothing"):
             det = result.get("detection")
-            base = (
-                f" (base: {det['base_ref']} @ {det['base_sha'][:8]})"
-                if det
-                else ""
-            )
+            base = f" (base: {det['base_ref']} @ {det['base_sha'][:8]})" if det else ""
             typer.echo(f"nothing to upgrade: {result['reason']}{base}")
             return
         det = result.get("detection")
@@ -355,9 +359,7 @@ def upgrade(
                 + (", ".join(det["modules"]) if det["modules"] else "none")
             )
         if result["modules"]:
-            typer.echo(
-                f"upgraded {result['db']} with modules: {','.join(result['modules'])}"
-            )
+            typer.echo(f"upgraded {result['db']} with modules: {','.join(result['modules'])}")
         if result.get("install"):
             typer.echo(f"installed new modules: {','.join(result['install'])}")
 
@@ -367,13 +369,12 @@ def upgrade(
 @app.command()
 def seed(ctx: typer.Context) -> None:
     """Run base.py and the branch seed, if present."""
+
     def _do() -> None:
         cfg = _load_config(ctx)
         result = seed_cmd.run(cfg)
         if result.get("skipped"):
-            typer.echo(
-                "seeds not configured or seeds dir missing - nothing to do."
-            )
+            typer.echo("seeds not configured or seeds dir missing - nothing to do.")
         elif result["ran"]:
             typer.echo("ran seeds: " + ", ".join(result["ran"]))
         else:
@@ -385,6 +386,7 @@ def seed(ctx: typer.Context) -> None:
 @app.command("list")
 def list_dbs(ctx: typer.Context) -> None:
     """List the project's branch databases (prefix only) with sizes."""
+
     def _do() -> None:
         cfg = _load_config(ctx)
         result = list_cmd.run(cfg)
@@ -410,6 +412,7 @@ def drop(
     ),
 ) -> None:
     """Drop a branch database and its filestore (prefix-guarded)."""
+
     def _do() -> None:
         cfg = _load_config(ctx)
         result = drop_cmd.run(cfg, yes=yes, db=db, ask=_ask)
@@ -427,6 +430,7 @@ def reset(
     yes: bool = typer.Option(False, "--yes", help="Skip confirmation."),
 ) -> None:
     """Drop and recreate the branch database from the template (with seeds)."""
+
     def _do() -> None:
         cfg = _load_config(ctx)
         result = reset_cmd.run(cfg, yes=yes, ask=_ask)
@@ -461,6 +465,7 @@ def hook_install(
     ),
 ) -> None:
     """Install the post-checkout hook (chmod 0755)."""
+
     def _do() -> None:
         cfg = _load_config(ctx)
         result = hook_cmd.install(cfg, force=force)
@@ -474,6 +479,7 @@ def hook_install(
 @hook_app.command("uninstall")
 def hook_uninstall(ctx: typer.Context) -> None:
     """Remove the hook, only if dbctl generated it."""
+
     def _do() -> None:
         cfg = _load_config(ctx)
         result = hook_cmd.uninstall(cfg)
@@ -495,6 +501,7 @@ def hook_uninstall(ctx: typer.Context) -> None:
 @hook_app.command("status")
 def hook_status(ctx: typer.Context) -> None:
     """Show hook path, ownership and enabled state (no side effects)."""
+
     def _do() -> None:
         cfg = _load_config(ctx)
         info = hook_cmd.info(cfg)

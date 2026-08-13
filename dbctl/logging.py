@@ -25,7 +25,7 @@ import os
 import sys
 import threading
 import traceback
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 _LOCK = threading.Lock()
@@ -50,17 +50,19 @@ def log_dir() -> Path:
     return _repo_dir() / "logs"
 
 
-def init(command: str, **fields) -> Path | None:
+def init(command: str, **fields: object) -> Path | None:
     """Open the per-day file and record the invocation. Returns the path."""
     global _FILE, _PATH, _RUN_ID, _COMMAND, _CONTEXT
     _COMMAND = command
-    _RUN_ID = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%f")[:-3]
+    _RUN_ID = datetime.now(UTC).strftime("%Y%m%dT%H%M%S.%f")[:-3]
     _CONTEXT = {}
     try:
         directory = log_dir()
         directory.mkdir(parents=True, exist_ok=True)
-        path = directory / f"dbctl-{datetime.now(timezone.utc):%Y-%m-%d}.jsonl"
-        _FILE = open(path, "a", encoding="utf-8")
+        path = directory / f"dbctl-{datetime.now(UTC):%Y-%m-%d}.jsonl"
+        # Process-lifetime append handle: the file must stay open so every
+        # event flushes to the same per-day log (noqa: SIM115 on purpose).
+        _FILE = open(path, "a", encoding="utf-8")  # noqa: SIM115
         _PATH = path
     except OSError:
         _FILE = None
@@ -76,7 +78,7 @@ def init(command: str, **fields) -> Path | None:
     return _PATH
 
 
-def set_context(**fields) -> None:
+def set_context(**fields: object) -> None:
     """Merge persistent per-run fields (project_root, config, ...)."""
     _CONTEXT.update(fields)
 
@@ -101,7 +103,7 @@ def redact_argv(argv: list[str]) -> list[str]:
     return redacted
 
 
-def _clean(value):
+def _clean(value: object) -> object:
     if isinstance(value, Path):
         return str(value)
     if isinstance(value, (list, tuple)):
@@ -111,9 +113,9 @@ def _clean(value):
     return value
 
 
-def log(level: str, event: str, **fields) -> None:
+def log(level: str, event: str, **fields: object) -> None:
     record: dict = {
-        "ts": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
+        "ts": datetime.now(UTC).isoformat(timespec="milliseconds"),
         "run": _RUN_ID,
         "level": level if level in _LEVELS else "info",
         "event": event,
@@ -131,23 +133,23 @@ def log(level: str, event: str, **fields) -> None:
                 pass
 
 
-def debug(event: str, **fields) -> None:
+def debug(event: str, **fields: object) -> None:
     log("debug", event, **fields)
 
 
-def info(event: str, **fields) -> None:
+def info(event: str, **fields: object) -> None:
     log("info", event, **fields)
 
 
-def warning(event: str, **fields) -> None:
+def warning(event: str, **fields: object) -> None:
     log("warning", event, **fields)
 
 
-def error(event: str, **fields) -> None:
+def error(event: str, **fields: object) -> None:
     log("error", event, **fields)
 
 
-def log_exception(event: str = "command_crashed", **fields) -> None:
+def log_exception(event: str = "command_crashed", **fields: object) -> None:
     fields.setdefault("error_type", "Exception")
     fields["traceback"] = traceback.format_exc().strip()
     log("error", event, **fields)

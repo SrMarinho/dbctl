@@ -9,12 +9,12 @@ from __future__ import annotations
 from dbctl.config import Config
 from dbctl.seeding import run_python
 
-_SANITIZE_CODE = f'''import uuid
+_SANITIZE_CODE = """import uuid
 
 env["ir.config_parameter"].set_param("database.uuid", str(uuid.uuid4()))
 mail_servers = env["ir.mail_server"].search([])
 if mail_servers:
-    mail_servers.write({{"active": False}})
+    mail_servers.write({"active": False})
 
 # Deliberate decision: ir.cron is NOT deactivated.
 # Testing crons is a legitimate dev use case; branch databases keep the
@@ -22,7 +22,7 @@ if mail_servers:
 # mail servers are disabled (a dev database must never send real email).
 env.cr.commit()
 print("DBCTL_SANITIZED")
-'''
+"""
 
 
 def sanitize(cfg: Config, db: str) -> None:

@@ -10,8 +10,8 @@ import os
 import shlex
 import subprocess
 import time
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
 
 from dbctl import logging as dlog
 from dbctl.errors import DockerError
@@ -65,7 +65,7 @@ def _execute(
             cwd=cwd,
             error="binary not found",
         )
-        raise DockerError(f"binary not found; cannot run: {' '.join(cmd)}")
+        raise DockerError(f"binary not found; cannot run: {' '.join(cmd)}") from None
     duration_ms = int((time.monotonic() - started) * 1000)
     if proc.returncode != 0:
         detail = (proc.stderr or "").strip() or (proc.stdout or "").strip()

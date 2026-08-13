@@ -16,10 +16,10 @@ import shutil
 import sys
 from pathlib import Path
 
+from dbctl import logging as dlog
 from dbctl.commands import use
 from dbctl.config import Config
 from dbctl.errors import DbctlError, GitError
-from dbctl import logging as dlog
 from dbctl.naming import database_name
 from dbctl.postgres import database_exists
 from dbctl.project import current_branch, hooks_dir
@@ -36,8 +36,7 @@ def _hook_path(cfg: Config) -> Path:
 def _exec_line(cfg: Config) -> str:
     """The single command the generated hook runs (spec section 6)."""
     return (
-        f'exec "{sys.executable}" -m dbctl --config "{cfg.path}" '
-        'hook post-checkout "$1" "$2" "$3"'
+        f'exec "{sys.executable}" -m dbctl --config "{cfg.path}" hook post-checkout "$1" "$2" "$3"'
     )
 
 
@@ -49,11 +48,7 @@ def _is_ours(path: Path) -> bool:
 
 
 def _script(cfg: Config) -> str:
-    return (
-        "#!/bin/sh\n"
-        f"{MARKER} (dbctl hook install)\n"
-        f"{_exec_line(cfg)}\n"
-    )
+    return f"#!/bin/sh\n{MARKER} (dbctl hook install)\n{_exec_line(cfg)}\n"
 
 
 def install(cfg: Config, *, force: bool = False) -> dict:
@@ -148,8 +143,7 @@ def on_checkout(cfg: Config, prev: str, new: str, branch_flag: str) -> list[str]
                 reason="detached HEAD - leaving the current database as is",
             )
             messages.append(
-                "dbctl: detached HEAD - leaving the current database as is "
-                "(rebase/bisect?)"
+                "dbctl: detached HEAD - leaving the current database as is (rebase/bisect?)"
             )
             return messages
 
@@ -166,8 +160,7 @@ def on_checkout(cfg: Config, prev: str, new: str, branch_flag: str) -> list[str]
                 reason="run 'dbctl create --use' when ready",
             )
             messages.append(
-                f"dbctl: database {target} does not exist yet - run "
-                "'dbctl create --use' when ready"
+                f"dbctl: database {target} does not exist yet - run 'dbctl create --use' when ready"
             )
             return messages
         use.run(cfg)

@@ -76,9 +76,7 @@ def detect(cfg: Config) -> dict:
     base_ref = default_base_ref(root, cfg.modules.base_ref)
     base_sha = merge_base(root, base_ref)
     paths = [
-        path
-        for path in changed_paths(root, base_sha)
-        if not _ignored(path, cfg.modules.ignore)
+        path for path in changed_paths(root, base_sha) if not _ignored(path, cfg.modules.ignore)
     ]
     modules: list[str] = []
     unmatched: list[str] = []

@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+from dbctl import logging as dlog
 from dbctl.commands import dry, target_db
 from dbctl.config import Config
 from dbctl.errors import DatabaseError
-from dbctl import logging as dlog
 from dbctl.filestore import copy as filestore_copy
 from dbctl.postgres import (
     clone_database,
@@ -29,16 +29,18 @@ def run(
     branch, db = target_db(cfg)
     if not dry() and database_exists(cfg, db):
         raise DatabaseError(
-            f"database '{db}' already exists - use 'dbctl reset' to recreate it "
-            "from the template."
+            f"database '{db}' already exists - use 'dbctl reset' to recreate it from the template."
         )
     source = template or cfg.postgres.template_db
     if not dry() and not database_exists(cfg, source):
         raise DatabaseError(
             f"template database '{source}' does not exist - create it first "
-            "(e.g. 'docker compose run --rm --no-deps {svc} odoo -d {source} -i base --stop-after-init')"
+            "(e.g. 'docker compose run --rm --no-deps {svc} odoo -d "
+            f"{source} -i base --stop-after-init')"
         )
-    dlog.info("create_start", db=db, source=source, branch=branch, no_seed=no_seed, no_upgrade=no_upgrade)
+    dlog.info(
+        "create_start", db=db, source=source, branch=branch, no_seed=no_seed, no_upgrade=no_upgrade
+    )
 
     strategy = get_strategy(cfg)
     previous = strategy.current_database()
@@ -89,12 +91,8 @@ def run(
                     to_upgrade = detection["modules"]
                     to_install: list[str] = []
                 else:
-                    to_upgrade = [
-                        m for m in detection["modules"] if m in installed
-                    ]
-                    to_install = [
-                        m for m in detection["modules"] if m not in installed
-                    ]
+                    to_upgrade = [m for m in detection["modules"] if m in installed]
+                    to_install = [m for m in detection["modules"] if m not in installed]
                 if to_upgrade or to_install:
                     dlog.info(
                         "create_phase",

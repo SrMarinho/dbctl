@@ -13,8 +13,7 @@ def run(cfg: Config) -> dict:
     branch, db = target_db(cfg)
     if not dry() and not database_exists(cfg, db):
         raise DatabaseError(
-            f"database '{db}' does not exist - run 'dbctl create' first "
-            f"(branch '{branch}')."
+            f"database '{db}' does not exist - run 'dbctl create' first (branch '{branch}')."
         )
     get_strategy(cfg).start(db)
     return {"db": db}

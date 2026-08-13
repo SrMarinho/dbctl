@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from contextlib import suppress
+
 from dbctl.config import Config
 from dbctl.errors import GitError
 from dbctl.naming import database_name
@@ -14,8 +16,6 @@ def run(cfg: Config) -> dict:
     rows = list_databases(cfg, cfg.postgres.db_prefix)
     served = get_strategy(cfg).current_database()
     current: str | None = None
-    try:
+    with suppress(GitError):
         current = database_name(current_branch(cfg.project_root), cfg.postgres.db_prefix)
-    except GitError:
-        pass  # listing works even without a usable branch
     return {"rows": rows, "current": current, "served": served}

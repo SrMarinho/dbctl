@@ -11,8 +11,8 @@ AND uncommitted). Modules detected but not installed in the database go to
 
 from __future__ import annotations
 
-from dbctl import modules as modules_detect
 from dbctl import logging as dlog
+from dbctl import modules as modules_detect
 from dbctl.commands import dry, target_db
 from dbctl.config import Config
 from dbctl.errors import ConfigError, DatabaseError
@@ -30,8 +30,7 @@ def run(
     branch, db = target_db(cfg)
     if not dry() and not database_exists(cfg, db):
         raise DatabaseError(
-            f"database '{db}' does not exist - run 'dbctl create' first "
-            f"(branch '{branch}')."
+            f"database '{db}' does not exist - run 'dbctl create' first (branch '{branch}')."
         )
 
     detection = None
@@ -58,12 +57,8 @@ def run(
                 if installed is None or not cfg.modules.install_new:
                     upgrade_modules = detection["modules"]
                 else:
-                    upgrade_modules = [
-                        m for m in detection["modules"] if m in installed
-                    ]
-                    install_modules = [
-                        m for m in detection["modules"] if m not in installed
-                    ]
+                    upgrade_modules = [m for m in detection["modules"] if m in installed]
+                    install_modules = [m for m in detection["modules"] if m not in installed]
                 dlog.info(
                     "upgrade_plan",
                     db=db,

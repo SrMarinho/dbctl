@@ -61,9 +61,7 @@ def database_exists(cfg: Config, name: str) -> bool:
 def list_databases(cfg: Config, prefix: str) -> list[tuple[str, str]]:
     """(name, human-readable size) for every database starting with ``prefix``."""
     # Escape LIKE metacharacters so '_' in the prefix is literal.
-    pattern = (
-        prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
-    )
+    pattern = prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
     out = _psql(
         cfg,
         "SELECT datname, pg_size_pretty(pg_database_size(datname)) "
@@ -95,9 +93,7 @@ def clone_database(cfg: Config, source: str, target: str) -> None:
     try:
         _psql(cfg, f"CREATE DATABASE {_ident(target)} TEMPLATE {_ident(source)}")
     except Exception as exc:
-        raise DatabaseError(
-            f"failed to clone '{source}' -> '{target}': {exc}"
-        ) from exc
+        raise DatabaseError(f"failed to clone '{source}' -> '{target}': {exc}") from exc
 
 
 def drop_database(cfg: Config, name: str) -> None:
@@ -113,7 +109,7 @@ def drop_database(cfg: Config, name: str) -> None:
             f"'{prefix}'. dbctl only manages databases it created."
         )
     terminate_connections(cfg, name)
-    _psql(cfg, f'DROP DATABASE IF EXISTS {_ident(name)}')
+    _psql(cfg, f"DROP DATABASE IF EXISTS {_ident(name)}")
 
 
 def installed_modules(cfg: Config, db: str) -> set[str] | None:
@@ -124,9 +120,7 @@ def installed_modules(cfg: Config, db: str) -> set[str] | None:
     module as -u. Never raises for that case.
     """
     try:
-        out = _psql_db(
-            cfg, db, "SELECT name FROM ir_module_module WHERE state = 'installed'"
-        )
+        out = _psql_db(cfg, db, "SELECT name FROM ir_module_module WHERE state = 'installed'")
     except DockerError as exc:
         if "does not exist" in str(exc):
             return None
