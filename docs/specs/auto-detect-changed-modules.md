@@ -105,7 +105,7 @@ para `[hooks].enabled`.
 **Arquivos tocados:** `dbctl/project.py`, `dbctl/modules.py` (novo), `dbctl/postgres.py`,
 `dbctl/config.py`, `dbctl/strategies/{base,compose_override,custom}.py`,
 `dbctl/commands/{upgrade,status,create}.py`, `dbctl/cli.py`, `.dbctl.example.toml`, `README.md`,
-`SPEC.md`.
+`docs/specs/` (arquitetura, configuração, módulos, casos de uso, validação).
 
 ---
 
@@ -123,7 +123,7 @@ para `[hooks].enabled`.
 
 ---
 
-## Verificação (manual, no sandbox da §10 da spec)
+## Verificação (manual, no sandbox da [validação](09-validacao.md) da spec)
 
 | # | Passo | Esperado |
 |---|---|---|
@@ -141,9 +141,9 @@ para `[hooks].enabled`.
 | M12 | `dbctl create` numa branch com módulo alterado | Banco nasce já com o `-u` aplicado; `--no-upgrade` pula |
 | M13 | `DBCTL_DRY_RUN=1 dbctl upgrade` | Imprime os comandos git e docker, sem efeito |
 
-Revalidar as invariantes da §11 da spec: `grep -rl subprocess dbctl/` continua devolvendo **apenas
+Revalidar as invariantes da [avaliação](10-avaliacao.md) da spec: `grep -rl subprocess dbctl/` continua devolvendo **apenas
 `docker.py`**, e as dependências seguem só o Typer.
 
-> `SPEC.md` (§4.2, §5, §6, §7.1, §10) e `README.md` entram junto, no mesmo padrão das outras
+> `docs/specs/` (arquitetura, configuração, módulos, casos de uso, validação) e `README.md` entram junto, no mesmo padrão das outras
 > features. Se você preferir specar primeiro e implementar depois — como fizemos com o hook — é só
 > dizer que eu escrevo só a spec.
