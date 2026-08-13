@@ -1,9 +1,9 @@
 # dbctl — Specs
 
-Especificação do `dbctl` dividida por tópico (antes: um único `SPEC.md` na
-raiz). A numeração das seções foi preservada — cada arquivo mantém os
-cabeçalhos `## N.` do documento original, então referências internas
-antigas (`seção 5.0`, `§10`, ...) continuam rastreáveis.
+Especificação do `dbctl` dividida por tópico (antes: um único documento na
+raiz do repositório). A numeração das seções foi preservada — cada arquivo
+mantém os cabeçalhos `## N.` do documento original, então referências
+internas antigas (`seção 5.0`, `§10`, ...) continuam rastreáveis.
 
 ## Ordem de leitura
 
