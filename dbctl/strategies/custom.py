@@ -21,6 +21,7 @@ class CustomStrategy(Strategy):
         filled = template.format(
             db=placeholders.get("db", ""),
             modules=placeholders.get("modules", ""),
+            install=placeholders.get("install", ""),
             project_root=self.cfg.project_root,
         )
         run(["bash", "-c", filled], cwd=str(self.cfg.project_root))
@@ -33,14 +34,24 @@ class CustomStrategy(Strategy):
     def stop(self) -> None:
         self._run(self.cfg.strategy.commands.stop)
 
-    def upgrade(self, db: str, modules: list[str]) -> None:
+    def apply_schema(self, db: str, modules: list[str], install: list[str] | None = None) -> None:
         template = self.cfg.strategy.commands.upgrade
         if not template:
             raise ConfigError(
                 "strategy.kind = 'custom' needs [strategy.commands].upgrade "
                 "for 'dbctl upgrade'"
             )
-        self._run(template, db=db, modules=",".join(modules))
+        self._run(
+            template,
+            db=db,
+            modules=",".join(modules),
+            install=",".join(install or []),
+        )
+
+    def upgrade(self, db: str, modules: list[str], install: list[str] | None = None) -> None:
+        # The declared upgrade command is the project's own full flow;
+        # do not wrap it in stop/start.
+        self.apply_schema(db, modules, install)
 
     def current_database(self) -> str | None:
         return None  # the tool cannot know what a custom strategy serves

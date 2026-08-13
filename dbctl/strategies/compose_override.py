@@ -63,22 +63,31 @@ class ComposeOverrideStrategy(Strategy):
     def stop(self) -> None:
         self._compose(["stop", self.cfg.odoo.compose_service])
 
-    def upgrade(self, db: str, modules: list[str]) -> None:
+    def apply_schema(self, db: str, modules: list[str], install: list[str] | None = None) -> None:
+        """Run `odoo -d <db> [-u ...] [-i ...] --stop-after-init` once.
+
+        Empty flags are omitted. Used by `upgrade` (after stop) and by
+        `create` (the service is already stopped there).
+        """
+        cmd: list[str] = [
+            "run",
+            "--rm",
+            "--no-deps",
+            self.cfg.odoo.compose_service,
+            "odoo",
+            "-d",
+            db,
+        ]
+        if modules:
+            cmd += ["-u", ",".join(modules)]
+        if install:
+            cmd += ["-i", ",".join(install)]
+        cmd += ["--stop-after-init"]
+        self._compose(cmd)
+
+    def upgrade(self, db: str, modules: list[str], install: list[str] | None = None) -> None:
         self.stop()
-        self._compose(
-            [
-                "run",
-                "--rm",
-                "--no-deps",
-                self.cfg.odoo.compose_service,
-                "odoo",
-                "-d",
-                db,
-                "-u",
-                ",".join(modules),
-                "--stop-after-init",
-            ]
-        )
+        self.apply_schema(db, modules, install)
         self.start(db)
 
     def current_database(self) -> str | None:

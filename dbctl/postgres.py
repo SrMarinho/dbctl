@@ -11,7 +11,7 @@ import os
 
 from dbctl.config import Config
 from dbctl.docker import exec_in
-from dbctl.errors import DatabaseError
+from dbctl.errors import DatabaseError, DockerError
 
 
 def _is_dry_run() -> bool:
@@ -35,6 +35,17 @@ def _psql(cfg: Config, sql: str, *, capture: bool = True) -> str:
         ["psql", "-U", cfg.postgres.user, "-d", "postgres", "-tA", "-c", sql],
         env=env,
         capture=capture,
+    )
+
+
+def _psql_db(cfg: Config, db: str, sql: str) -> str:
+    """Like _psql but connected to ``db`` instead of the postgres database."""
+    env = {"PGPASSWORD": cfg.postgres.password}
+    return exec_in(
+        cfg.postgres.container,
+        ["psql", "-U", cfg.postgres.user, "-d", db, "-tA", "-c", sql],
+        env=env,
+        capture=True,
     )
 
 
@@ -103,3 +114,21 @@ def drop_database(cfg: Config, name: str) -> None:
         )
     terminate_connections(cfg, name)
     _psql(cfg, f'DROP DATABASE IF EXISTS {_ident(name)}')
+
+
+def installed_modules(cfg: Config, db: str) -> set[str] | None:
+    """Names of installed modules in ``db``, or None when it is not Odoo.
+
+    A missing ir_module_module table (non-Odoo database) yields None -
+    "don't know" - and the caller degrades to treating every detected
+    module as -u. Never raises for that case.
+    """
+    try:
+        out = _psql_db(
+            cfg, db, "SELECT name FROM ir_module_module WHERE state = 'installed'"
+        )
+    except DockerError as exc:
+        if "does not exist" in str(exc):
+            return None
+        raise
+    return {line.strip() for line in out.splitlines() if line.strip()}

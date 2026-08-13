@@ -22,8 +22,12 @@ class Strategy(ABC):
         """Stop the Odoo service."""
 
     @abstractmethod
-    def upgrade(self, db: str, modules: list[str]) -> None:
-        """Apply module upgrades (-u) to ``db`` and serve it again."""
+    def apply_schema(self, db: str, modules: list[str], install: list[str] | None = None) -> None:
+        """Run -u/-i once on ``db`` WITHOUT touching the service state."""
+
+    @abstractmethod
+    def upgrade(self, db: str, modules: list[str], install: list[str] | None = None) -> None:
+        """stop() -> apply_schema() -> start(db): serve ``db`` upgraded."""
 
     @abstractmethod
     def current_database(self) -> str | None:
