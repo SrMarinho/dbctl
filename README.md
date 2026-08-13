@@ -25,7 +25,7 @@ python3 -m venv .venv
 
 Use `.venv/bin/dbctl` (ou adicione ao PATH / crie um alias).
 
-## Injetar um projeto novo (CU-1)
+## Injetar um projeto novo (Caso 1)
 
 O projeto precisa: ser um repo git; rodar Postgres e Odoo em containers Docker
 com nomes estáveis; ter um `docker-compose.yml` com o serviço do Odoo (o
@@ -93,7 +93,7 @@ dbctl drop                # remove banco + filestore (confirmação)
 dbctl unuse               # remove o override; o projeto volta à config base
 ```
 
-## Hook post-checkout (opcional, CU-3.1)
+## Hook post-checkout (opcional, Caso 3.1)
 
 Quer trocar de branch sem digitar `dbctl use`? Instale o hook uma vez:
 

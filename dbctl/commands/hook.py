@@ -1,7 +1,7 @@
 """dbctl hook - install/remove/run the post-checkout git hook.
 
 The hook keeps the Odoo service serving the right database on every branch
-switch (CU-3.1). Same contract as the other commands: returns data, never
+switch (Case 3.1). Same contract as the other commands: returns data, never
 prints.
 
 Golden rule: the generated post-checkout must NEVER make `git checkout`
