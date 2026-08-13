@@ -14,11 +14,13 @@ Trocar de branch passa a ser: `git checkout <branch>` + `dbctl use`.
 Lint, formatação e tipos são garantidos por **pre-commit** (ruff + mypy):
 
 ```bash
-uv tool install pre-commit     # uma vez
-pre-commit install             # liga o hook de commit (já instalado no repo)
-pre-commit run --all-files     # roda tudo manualmente
+uv sync --extra dev     # instala o tool + pre-commit no .venv
+pre-commit install      # liga o hook de commit (já instalado no repo)
+pre-commit run --all-files
 ```
 
+Para o hook funcionar em qualquer shell, o `pre-commit` precisa estar no PATH:
+`uv tool install pre-commit` (uma vez) ou ative o venv (`source .venv/bin/activate`).
 Configuração: `.pre-commit-config.yaml` + `[tool.ruff]`/`[tool.mypy]` no
 `pyproject.toml` (linha 100, regras E/F/W/I/UP/B/SIM/C4; mypy com
 `disallow_untyped_defs` etc.). Rodar localmente sem pre-commit:
@@ -26,19 +28,20 @@ Configuração: `.pre-commit-config.yaml` + `[tool.ruff]`/`[tool.mypy]` no
 
 ## Instalação
 
-Requisitos: Python >= 3.11, Docker + Docker Compose v2, git. O tool **não**
-precisa de `psql` no host nem de acesso direto à porta do Postgres — toda
-operação de banco roda via `docker exec` no container do Postgres.
+Requisitos: Python >= 3.11, **uv** (gestor de ambientes), Docker + Docker
+Compose v2, git. O tool **não** precisa de `psql` no host nem de acesso direto
+à porta do Postgres — toda operação de banco roda via `docker exec` no
+container do Postgres.
 
 ```bash
 git clone <seu-repo-do-dbctl> ~/projects/dbctl
 cd ~/projects/dbctl
-python3 -m venv .venv
-.venv/bin/pip install -e .
-# (ou com uv: uv venv .venv && uv pip install -e .)
+uv sync --extra dev   # cria .venv, instala o dbctl (editável) + ferramentas dev
 ```
 
-Use `.venv/bin/dbctl` (ou adicione ao PATH / crie um alias).
+Use `.venv/bin/dbctl` (ou adicione ao PATH / crie um alias). O `uv.lock`
+versionado garante instalação reproduzível; para atualizar o ambiente após um
+pull, rode `uv sync` de novo.
 
 ## Injetar um projeto novo (Caso 1)
 

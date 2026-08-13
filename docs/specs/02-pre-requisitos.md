@@ -8,9 +8,9 @@
 | Requisito | Estado verificado | Como conferir |
 |---|---|---|
 | Python ≥ 3.11 | Python 3.14.4 presente | `python3 --version` |
+| uv (gestor de venv/instalação) | presente — `uv sync` + `uv.lock` versionado | `uv --version` |
 | Docker + Docker Compose v2 | presentes e em uso | `docker ps`, `docker compose version` |
 | Git | presente | `git --version` |
-| pipx / uv / poetry | **ausentes** — usar `venv` + `pip` | `which pipx uv poetry` |
 
 O tool **não** deve exigir client `psql` no host, nem acesso direto à porta do Postgres. Toda operação
 de banco é feita via `docker exec` no container do Postgres. Isso é requisito de portabilidade.
