@@ -25,7 +25,15 @@ base_ref    = "origin/main"        # opcional; default = origin/HEAD, depois mai
 manifest    = "__manifest__.py"    # opcional; o que marca a raiz de um módulo
 install_new = true                 # opcional; módulo novo -> -i, não -u
 ignore      = ["**/static/**"]     # opcional; globs que nunca disparam upgrade
+exclude     = ["modulo_quebrado"]  # opcional; nomes de módulo que o dbctl nunca
+                                    # aplica sozinho (detecção, --all, default_modules)
 ```
+
+`exclude` é o escape hatch para um módulo com bug pré-existente e sem relação com a branch
+atual (xmlid duplicado, dependência ausente no manifest, view SQL lendo tabela de módulo não
+declarado em `depends`, etc.): sem ele, esse módulo trava `upgrade`/`create` de **qualquer**
+branch sempre que entra via detecção, `--all` ou `odoo.default_modules`. Um `-m` explícito com
+o nome do módulo sempre ignora a exclusão — é escape hatch de projeto, não trava definitiva.
 
 Overrides `DBCTL_MODULES_*` saem de graça pelo padrão `DBCTL_<SEÇÃO>_<CHAVE>`. Booleanos usam o
 mesmo parser estrito do `[hooks].enabled` (arquivo: TOML `true`/`false`; env: `1/true/yes/on` e
@@ -46,8 +54,10 @@ mesmo parser estrito do `[hooks].enabled` (arquivo: TOML `true`/`false`; env: `1
 - `modules.py` (novo) — mapeamento caminho → módulo:
   - `module_of(path, root, manifest) -> str | None` — sobe dos ancestrais até achar o manifesto;
     o nome do diretório é o módulo. Para no `project_root`. Agnóstico de layout.
-  - `detect(cfg) -> dict` — `{base_ref, base_sha, modules, changed_paths, unmatched}`. Aplica os
-    globs de `[modules].ignore` antes do mapeamento; `unmatched` só aparece com `--verbose`.
+  - `detect(cfg) -> dict` — `{base_ref, base_sha, modules, excluded, changed_paths, unmatched}`.
+    Aplica os globs de `[modules].ignore` antes do mapeamento; módulo em `[modules].exclude` sai
+    de `modules` e entra em `excluded` (nunca aplicado, mas reportado); `unmatched` só aparece
+    com `--verbose`.
 - `postgres.py` — `_psql_db(cfg, db, sql)` (conecta em `-d <db>`) e
   `installed_modules(cfg, db) -> set[str] | None` (`state = 'installed'`). Tabela ausente →
   `None` = "não sei" → o chamador trata tudo como `-u`. Nunca levanta por causa disso.
@@ -57,11 +67,16 @@ mesmo parser estrito do `[hooks].enabled` (arquivo: TOML `true`/`false`; env: `1
   flag vazia; `custom` ganha o placeholder `{install}`.
 - `commands/upgrade.py` — precedência: `-m` explícito > `--all` > detecção (se `[modules].detect`)
   > `odoo.default_modules` > **nada a fazer, exit 0** ("nenhum módulo mudou" é estado válido).
-  Cruza o detectado com `installed_modules` para partir em `-u`/`-i`.
+  Cruza o detectado com `installed_modules` para partir em `-u`/`-i`. `[modules].exclude` é
+  subtraído de tudo que o dbctl monta sozinho — inclusive de `default_modules` e de `--all`
+  (que vira uma lista explícita via `installed_modules(cfg, db)` minus `exclude`, já que `-u all`
+  não tem como pular módulo nenhum; sem tabela `ir_module_module` para consultar, `--all` +
+  `exclude` não configurado juntos é `ConfigError`). Nunca se aplica a `-m` explícito.
 - `commands/status.py` — campo `changed_modules` (preview; **não** executa nada; falha de detecção
-  vira `error` no campo, sem quebrar o status).
+  vira `error` no campo, sem quebrar o status). Inclui `excluded` para transparência.
 - `commands/create.py` — depois dos seeds e antes do start final, aplica os módulos detectados
-  (`apply_schema`). Novo parâmetro `no_upgrade`.
+  (`apply_schema`), já descontado `[modules].exclude` tanto da detecção quanto de
+  `odoo.default_modules` no caminho fresh. Novo parâmetro `no_upgrade`.
 - `cli.py` — `upgrade` ganha `--detect/--no-detect` e imprime o que detectou e por quê
   (`base_ref` + sha) antes de agir; `create` ganha `--no-upgrade`; `status` imprime a linha
   `modules:`.
@@ -77,6 +92,10 @@ mesmo parser estrito do `[hooks].enabled` (arquivo: TOML `true`/`false`; env: `1
 | Arquivo fora de qualquer módulo (`docker-compose.yml`) | Vai para `unmatched`, visível só com `--verbose` |
 | Banco sem tabela `ir_module_module` | `installed_modules` devolve `None` → tudo tratado como `-u` |
 | HEAD destacado | `GitError` já existente, sem mudança |
+| Módulo em `[modules].exclude` mudou nesta branch | Some de `modules`, aparece em `excluded`; nunca upgradado/instalado |
+| `odoo.default_modules` inteiramente coberto por `exclude` | `ConfigError` nomeando os módulos, sugerindo `-m` ou editar uma das duas listas |
+| `--all` combinado com `[modules].exclude` sem `ir_module_module` no banco | `ConfigError` — não há como enumerar o que existe pra subtrair a exclusão |
+| `-m modulo_excluido` | `-m` explícito sempre vence; exclusão não se aplica |
 
 ### 13.5 Validação (M1–M13)
 
@@ -95,6 +114,11 @@ mesmo parser estrito do `[hooks].enabled` (arquivo: TOML `true`/`false`; env: `1
 | M11 | `[modules] detect = false` | Comportamento idêntico ao de hoje |
 | M12 | `dbctl create` numa branch com módulo alterado | Banco nasce já com o `-u` aplicado; `--no-upgrade` pula |
 | M13 | `DBCTL_DRY_RUN=1 dbctl upgrade` | Imprime os comandos git e docker, sem efeito |
+| M14 | `[modules] exclude = ["quebrado"]`, alterar `quebrado` e outro módulo na branch, `dbctl upgrade` | Upgrada só o outro módulo; `excluded: quebrado` na saída |
+| M15 | `dbctl upgrade -m quebrado` com o `exclude` de M14 ativo | `-m` explícito vence; `quebrado` é upgradado normalmente |
+| M16 | `--all` com `exclude` configurado e banco com `ir_module_module` | Upgrada todos os instalados **exceto** os excluídos (lista explícita, não mais `-u all`) |
+| M17 | `--all` com `exclude` configurado num banco fresh (sem `ir_module_module`) | `ConfigError` explicando a falta da tabela |
+| M18 | `odoo.default_modules` com todos os módulos também em `exclude`, `dbctl upgrade --no-detect` | `ConfigError` nomeando os módulos cobertos |
 
 Revalidar as invariantes: `grep -rl subprocess dbctl/` devolve **apenas `docker.py`**; dependências
 seguem só o Typer.

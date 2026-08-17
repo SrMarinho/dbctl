@@ -68,9 +68,13 @@ def module_of(path: str, root: Path, manifest: str) -> str | None:
 def detect(cfg: Config) -> dict:
     """Detect modules changed on this branch since the base ref.
 
-    Returns {base_ref, base_sha, modules, changed_paths, unmatched}.
+    Returns {base_ref, base_sha, modules, excluded, changed_paths, unmatched}.
     ``unmatched`` (files outside any module, e.g. docker-compose.yml) is
-    useful only under --verbose; everything else ignores it.
+    useful only under --verbose; everything else ignores it. ``excluded`` is
+    modules that changed but are listed in [modules].exclude - a project-wide
+    escape hatch for a module that is broken independently of any branch
+    (e.g. missing manifest dependency), so it never blocks `upgrade`/`create`
+    for unrelated work. They are reported, never applied.
     """
     root = cfg.project_root
     base_ref = default_base_ref(root, cfg.modules.base_ref)
@@ -78,20 +82,26 @@ def detect(cfg: Config) -> dict:
     paths = [
         path for path in changed_paths(root, base_sha) if not _ignored(path, cfg.modules.ignore)
     ]
+    exclude = set(cfg.modules.exclude)
     modules: list[str] = []
+    excluded: list[str] = []
     unmatched: list[str] = []
     for path in paths:
         module = module_of(path, root, cfg.modules.manifest)
-        if module is not None:
-            if module not in modules:
-                modules.append(module)
-        else:
+        if module is None:
             unmatched.append(path)
+        elif module in exclude:
+            if module not in excluded:
+                excluded.append(module)
+        elif module not in modules:
+            modules.append(module)
     modules.sort()
+    excluded.sort()
     return {
         "base_ref": base_ref,
         "base_sha": base_sha,
         "modules": modules,
+        "excluded": excluded,
         "changed_paths": paths,
         "unmatched": unmatched,
     }

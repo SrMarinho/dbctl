@@ -133,3 +133,26 @@ def test_detect_detects_new_untracked_module(tmp_path) -> None:
 
     result = detect(_cfg_for(repo))
     assert result["modules"] == ["fresh"]
+
+
+def test_detect_excludes_configured_modules(tmp_path) -> None:
+    repo = _repo_with_modules(tmp_path)
+    toml = repo / ".dbctl.toml"
+    toml.write_text(
+        '[postgres]\ncontainer="c"\nuser="u"\npassword="p"\ntemplate_db="t"\n'
+        '[odoo]\ncontainer="o"\ncompose_service="web"\n'
+        '[modules]\nexclude = ["broken"]\n',
+        encoding="utf-8",
+    )
+    for name in ("broken", "demo"):
+        module_dir = repo / "addons" / name
+        module_dir.mkdir(parents=True)
+        (module_dir / "__manifest__.py").write_text("{}", encoding="utf-8")
+    subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
+    subprocess.run(["git", "-C", str(repo), "commit", "-qm", "two modules"], check=True)
+
+    result = detect(load_config(repo, toml))
+    # excluded modules never reach "modules" - upgrade/create must not touch
+    # them - but they are still reported, so the user can see why.
+    assert result["modules"] == ["demo"]
+    assert result["excluded"] == ["broken"]

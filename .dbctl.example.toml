@@ -19,7 +19,11 @@
 container   = "my-postgres-container"   # required
 user        = "my_db_user"              # required
 # password  = "..."                     # optional if DBCTL_POSTGRES_PASSWORD is set
-template_db = "my_template_db"          # required
+# template_db = "my_template_db"        # OPTIONAL: set to clone an existing
+                                        # database on `create`; leave it out
+                                        # to create a FRESH database per
+                                        # branch (initialized with base +
+                                        # default_modules + changed modules)
 db_prefix   = "dev_"                    # optional, default "dev_"
 
 [odoo]
@@ -51,6 +55,12 @@ detect = true                           # optional, default true; false returns
 # install_new = true                    # optional; new module -> -i, not -u
 # ignore      = ["**/static/**"]        # optional; globs that never trigger
                                         # an upgrade
+# exclude     = ["known_broken_mod"]    # optional; module names dbctl never
+                                        # auto-applies (detection, --all,
+                                        # default_modules). Explicit `-m` still
+                                        # wins - this is only an escape hatch
+                                        # for modules broken independently of
+                                        # the current branch.
 
 # Escape hatch - only when kind = "custom".
 # Placeholders available: {db}, {modules}, {install}, {project_root}

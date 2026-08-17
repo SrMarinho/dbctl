@@ -37,7 +37,10 @@ descoberta automática do repo git não é suficiente); pode ser combinada com `
 container   = "db-green-compras-local"   # obrigatório
 user        = "foo-user"                 # obrigatório
 password    = "foo-pass"                 # opcional se DBCTL_PG_PASSWORD estiver setado
-template_db = "greencompras_local"       # obrigatório
+# template_db = "greencompras_local"     # OPCIONAL: clona um banco existente no
+                                        # `create`; ausente = cria banco NOVO (vazio)
+                                        # por branch, inicializado com base +
+                                        # default_modules + módulos da branch
 db_prefix   = "dev_"                     # opcional, default "dev_"
 
 [odoo]
@@ -94,6 +97,10 @@ problemática e o caminho do arquivo:
    `post-checkout` guarda num stash nomeado (`dbctl-wip <prev> <data>`, com `-u`) qualquer mudança
    não commitada do working tree — a rede de segurança contra perda de código ao trocar de branch.
    Nunca roda com HEAD destacado (rebase/bisect).
+10. `postgres.template_db` é **opcional**. Ausente (ou vazio), `create`/`reset` criam um banco
+    **novo** (vazio), inicializado com `base` + `odoo.default_modules` + módulos alterados da branch;
+    presente (ou `--from` no `create`), o banco é clonado do template (filestore + sanitize + seeds).
+    O clone é sempre opt-in — nunca obrigatório.
 
 ### 5.3 Overrides por variável de ambiente
 

@@ -204,7 +204,7 @@ def status(ctx: typer.Context) -> None:
         typer.echo(f"target db:   {info['target_db']}")
         typer.echo(f"exists:      {'yes' if info['exists'] else 'no'}")
         typer.echo(f"served now:  {served}")
-        typer.echo(f"template:    {info['template']}")
+        typer.echo(f"template:    {info['template'] or 'none (fresh create)'}")
         typer.echo(f"branch seed: {seed}")
         hook = info["hook"]
         if hook["installed"] and hook["ours"]:
@@ -229,6 +229,8 @@ def status(ctx: typer.Context) -> None:
                 f"modules:     none changed "
                 f"(base: {changed['base_ref']} @ {changed['base_sha'][:8]})"
             )
+        if changed.get("excluded"):
+            typer.echo(f"excluded:    {', '.join(changed['excluded'])} (via [modules].exclude)")
         if info["dirty"]:
             typer.echo(
                 "warning: working tree has uncommitted changes - the branch "
@@ -243,9 +245,14 @@ def status(ctx: typer.Context) -> None:
 def create(
     ctx: typer.Context,
     from_template: str | None = typer.Option(
-        None, "--from", help="Template database (default: postgres.template_db)."
+        None,
+        "--from",
+        help=(
+            "Clone from this template (default: postgres.template_db; "
+            "omit both for a fresh database)."
+        ),
     ),
-    no_seed: bool = typer.Option(False, "--no-seed", help="Skip seeds after cloning."),
+    no_seed: bool = typer.Option(False, "--no-seed", help="Skip seeds."),
     use: bool = typer.Option(False, "--use", help="Serve the new database right away."),
     no_upgrade: bool = typer.Option(
         False,
@@ -253,7 +260,13 @@ def create(
         help="Skip applying the branch's changed modules after cloning.",
     ),
 ) -> None:
-    """Clone the template into the branch database (filestore + sanitize + seeds + schema)."""
+    """Create the branch database: fresh (default) or cloned from a template.
+
+    With postgres.template_db set or --from given, the database is cloned
+    from that template (filestore + sanitize + seeds + schema). Without
+    either, a fresh empty database is created and initialized with
+    base + odoo.default_modules + the branch's changed modules.
+    """
 
     def _do() -> None:
         cfg = _load_config(ctx)
@@ -264,7 +277,11 @@ def create(
             use=use,
             no_upgrade=no_upgrade,
         )
-        typer.echo(f"created {result['db']} from {result['source']}")
+        source = result["source"]
+        if source:
+            typer.echo(f"created {result['db']} from {source}")
+        else:
+            typer.echo(f"created {result['db']} (fresh, no template)")
         typer.echo(f"filestore: {result['filestore']}")
         if result["seeds"]:
             typer.echo("seeds: " + ", ".join(result["seeds"]))
@@ -281,10 +298,14 @@ def create(
                     parts.append(f"-u {','.join(upgrade['modules'])}")
                 if upgrade["install"]:
                     parts.append(f"-i {','.join(upgrade['install'])}")
-                typer.echo(
-                    f"schema:     {' '.join(parts)} "
-                    f"(base: {upgrade['base_ref']} @ {upgrade['base_sha'][:8]})"
-                )
+                base_note = ""
+                if upgrade.get("base_sha"):
+                    base_note = f" (base: {upgrade['base_ref']} @ {upgrade['base_sha'][:8]})"
+                typer.echo(f"schema:     {' '.join(parts) or '-i base'}{base_note}")
+                if upgrade.get("excluded"):
+                    typer.echo(
+                        f"excluded:   {', '.join(upgrade['excluded'])} (via [modules].exclude)"
+                    )
         if result["served"]:
             url = _web_url(cfg)
             typer.echo(f"now serving {result['served']}" + (f" ({url})" if url else ""))
@@ -351,6 +372,8 @@ def upgrade(
             det = result.get("detection")
             base = f" (base: {det['base_ref']} @ {det['base_sha'][:8]})" if det else ""
             typer.echo(f"nothing to upgrade: {result['reason']}{base}")
+            if result.get("excluded"):
+                typer.echo(f"excluded: {', '.join(result['excluded'])} (via [modules].exclude)")
             return
         det = result.get("detection")
         if det:
@@ -362,6 +385,8 @@ def upgrade(
             typer.echo(f"upgraded {result['db']} with modules: {','.join(result['modules'])}")
         if result.get("install"):
             typer.echo(f"installed new modules: {','.join(result['install'])}")
+        if result.get("excluded"):
+            typer.echo(f"excluded: {', '.join(result['excluded'])} (via [modules].exclude)")
 
     _run(ctx, _do)
 

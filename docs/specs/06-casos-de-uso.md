@@ -7,7 +7,8 @@
 **Ator:** desenvolvedor com um projeto Odoo ainda não gerenciado.
 1. Copia `.dbctl.example.toml` como `.dbctl.toml`, na raiz do projeto **ou** dentro de uma pasta já
    ignorada pelo git (ver [arquitetura](03-arquitetura.md) e [configuração](04-configuracao.md)) — a segunda opção evita mexer em `.gitignore` versionado.
-2. Preenche containers, credenciais e template DB.
+2. Preenche containers, credenciais e — **opcionalmente** — o template DB. Sem template, o
+   `create` faz bancos novos (vazios) por branch.
 3. Se optou pela raiz, adiciona `.dbctl.toml` e a pasta de seeds ao `.gitignore` do projeto (o exemplo
    deve trazer essa instrução comentada no topo). Se colocou numa pasta já ignorada, este passo some.
 4. `dbctl status` → confirma que o projeto foi detectado, mostra qual `.dbctl.toml` foi usado
@@ -18,7 +19,9 @@ config foi colocado numa pasta já ignorada.
 
 ### Caso 2 — Começar a trabalhar numa branch nova
 1. `git checkout -b GC-700-nova-feature`
-2. `dbctl create` — clona o template, copia filestore, sanitiza, roda seeds.
+2. `dbctl create` — sem template no config: cria um banco **novo** (vazio) e inicializa com
+   `base` + `default_modules` + módulos alterados da branch; com `template_db`/`--from`: clona,
+   copia filestore, sanitiza. Nos dois casos roda seeds.
 3. `dbctl use` — o Odoo passa a servir o banco dessa branch.
 4. `dbctl upgrade -m modulo_alterado` — aplica mudanças de schema **só nesse banco**.
 
@@ -39,7 +42,8 @@ config foi colocado numa pasta já ignorada.
    `DBCTL_HOOKS_ENABLED=0` na sessão do shell.
 
 ### Caso 4 — Banco sujou, recomeçar
-`dbctl reset` — dropa e recria a partir do template, com seeds. Uma confirmação, a não ser com `--yes`.
+`dbctl reset` — dropa e recria a partir do template, quando configurado; sem template, recria do
+zero (banco novo vazio). Com seeds. Uma confirmação, a não ser com `--yes`.
 
 ### Caso 5 — Dados específicos da branch
 1. Cria `<seeds_path>/branches/<slug>.py` com uma função `run(env)` idempotente.
@@ -60,28 +64,32 @@ falhas esperadas.
 - **Passos:** resolve branch → nome do banco → checa existência → lê `current_database()` da estratégia
   → detecta se há seed de branch → lê `hook.info(cfg)`.
 - **Saída:** projeto (caminho da raiz), **config (caminho do `.dbctl.toml` em uso)**, branch, banco
-  alvo, existe (sim/não), banco servido agora, template, seed da branch detectado (caminho ou
-  "nenhum"), **hook** (`installed, enabled` / `installed, disabled` / `not installed`).
+  alvo, existe (sim/não), banco servido agora, template (ou "none (fresh create)" quando não
+  configurado), seed da branch detectado (caminho ou "nenhum"), **hook** (`installed, enabled` /
+  `installed, disabled` / `not installed`).
 - **Aviso opcional:** se `git status --porcelain` do projeto não estiver vazio, uma linha `warning:
   working tree has uncommitted changes` — o banco da branch pode não ter o schema do código ainda não
   commitado. Só aviso, nunca bloqueia.
 - **Efeito colateral:** nenhum. Este comando é sempre seguro.
 
-#### `dbctl create [--from TEMPLATE] [--no-seed] [--use]`
-- **Pré:** banco alvo **não** existe (senão erro sugerindo `reset`); template existe; containers
-  Postgres e do serviço Odoo conhecidos.
-- **Passos:**
-  1. `strategy.stop()` — necessário porque o Postgres exige **zero conexões** no template para clonar,
-     e o Odoo mantém pool aberto;
-  2. `terminate_connections(template)` — remove conexões residuais;
-  3. `clone_database(template → alvo)`;
-  4. `filestore.copy(template → alvo)`;
-  5. `sanitize(alvo)` — roda antes do override existir, então usa o mesmo canal efêmero do seed;
-  6. `run_seeds(alvo)`, salvo `--no-seed` — monta a pasta de seeds via `-v` explícito, sem depender
-     do override (que só é escrito no passo 7);
-  7. se `--use`, `strategy.start(alvo)`; senão, restaura o serviço no banco em que estava antes.
-- **Falhas:** se o clone falhar no meio, o comando deve tentar remover o banco parcial antes de
-  propagar o erro, para não deixar estado sujo.
+#### `dbctl create [--from TEMPLATE] [--no-seed] [--use] [--no-upgrade]`
+- **Pré:** banco alvo **não** existe (senão erro sugerindo `reset`); se houver template (config ou
+  `--from`), ele existe; containers Postgres e do serviço Odoo conhecidos.
+- **Dois caminhos, um fluxo:**
+  - **Clone (template configurado ou `--from`):** `strategy.stop()` (o Postgres exige **zero
+    conexões** no template para clonar, e o Odoo mantém pool aberto) → `terminate_connections(template)`
+    → `clone_database(template → alvo)` → `filestore.copy` → `sanitize(alvo)`.
+  - **Fresh (sem template):** `strategy.stop()` → `create_database(alvo)` — `CREATE DATABASE` vazio,
+    sem `TEMPLATE`; **não** há filestore para copiar nem o que sanitizar.
+- Depois, nos dois casos:
+  1. schema da branch — no clone, `-u`/`-i` dos módulos detectados; no fresh, `-i
+     base[,default_modules][,detectados]` (um banco vazio não tem nada para `-u`);
+  2. `run_seeds(alvo)`, salvo `--no-seed` — roda **depois** do schema (seeds precisam das tabelas do
+     Odoo; no clone o schema já existe); monta a pasta de seeds via `-v` explícito, sem depender do
+     override (que só é escrito no passo 3);
+  3. se `--use`, `strategy.start(alvo)`; senão, restaura o serviço no banco em que estava antes.
+- **Falhas:** se a criação/clone falhar no meio, o comando deve tentar remover o banco parcial antes
+  de propagar o erro, para não deixar estado sujo.
 
 #### `dbctl use`
 - **Pré:** banco da branch existe (senão erro sugerindo `create`).

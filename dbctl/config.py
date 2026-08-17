@@ -26,7 +26,7 @@ class PostgresConfig:
     container: str
     user: str
     password: str
-    template_db: str
+    template_db: str | None = None  # None = create fresh databases (no clone)
     db_prefix: str = "dev_"
 
 
@@ -74,6 +74,7 @@ class ModulesConfig:
     manifest: str = "__manifest__.py"  # file marking a module root
     install_new: bool = True  # detected-but-not-installed modules -> -i
     ignore: list[str] = field(default_factory=list)  # globs that never trigger
+    exclude: list[str] = field(default_factory=list)  # module names dbctl never auto-applies
 
 
 @dataclass
@@ -160,7 +161,10 @@ def load_config(project_root: Path, config_path: Path) -> Config:
     missing: list[str] = []
     container = _require("postgres", pg_raw, "container", missing)
     user = _require("postgres", pg_raw, "user", missing)
-    template_db = _require("postgres", pg_raw, "template_db", missing)
+    template_db = _env("postgres", "template_db")
+    if template_db is None:
+        raw_tpl = pg_raw.get("template_db")
+        template_db = str(raw_tpl) if isinstance(raw_tpl, str) and raw_tpl.strip() else None
     password = _env("postgres", "password") or (
         pg_raw.get("password") if isinstance(pg_raw.get("password"), str) else None
     )
@@ -302,6 +306,13 @@ def load_config(project_root: Path, config_path: Path) -> Config:
         raw_ignore = md_raw.get("ignore", [])
         ignore = list(raw_ignore) if isinstance(raw_ignore, list) else []
 
+    env_exclude = _env("modules", "exclude")
+    if env_exclude is not None:
+        exclude = [part.strip() for part in env_exclude.split(",") if part.strip()]
+    else:
+        raw_exclude = md_raw.get("exclude", [])
+        exclude = list(raw_exclude) if isinstance(raw_exclude, list) else []
+
     return Config(
         project_root=root,
         path=cfg_path,
@@ -332,6 +343,7 @@ def load_config(project_root: Path, config_path: Path) -> Config:
             manifest=manifest_value,
             install_new=install_new,
             ignore=ignore,
+            exclude=exclude,
         ),
         warnings=warnings,
     )

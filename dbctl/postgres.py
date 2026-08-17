@@ -84,6 +84,16 @@ def terminate_connections(cfg: Config, name: str) -> None:
     )
 
 
+def create_database(cfg: Config, name: str) -> None:
+    """Create a fresh, empty database (no TEMPLATE)."""
+    if not _is_dry_run() and database_exists(cfg, name):
+        raise DatabaseError(f"database '{name}' already exists - use 'dbctl reset' to recreate it.")
+    try:
+        _psql(cfg, f"CREATE DATABASE {_ident(name)}")
+    except Exception as exc:
+        raise DatabaseError(f"failed to create database '{name}': {exc}") from exc
+
+
 def clone_database(cfg: Config, source: str, target: str) -> None:
     if not _is_dry_run() and database_exists(cfg, target):
         raise DatabaseError(

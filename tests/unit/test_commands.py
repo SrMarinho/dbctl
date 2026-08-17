@@ -12,6 +12,7 @@ from __future__ import annotations
 import pytest
 
 from dbctl.commands import create, drop, list_dbs, reset, seed, status, unuse, upgrade, use
+from dbctl.config import Config
 from dbctl.errors import ConfigError, DatabaseError, UserAbort
 
 # --- status -----------------------------------------------------------------
@@ -176,6 +177,17 @@ def test_reset_drops_then_creates(
     assert drops
 
 
+def test_reset_fresh_confirmation_mentions_scratch(tmp_path, fake_run) -> None:
+    from dbctl.commands import reset as reset_cmd
+
+    cfg = _fresh_config(tmp_path)
+    messages: list[str] = []
+    with pytest.raises(UserAbort):
+        reset_cmd.run(cfg, ask=lambda m: messages.append(m) or False)
+    assert messages and "scratch (fresh)" in messages[0]
+    assert "'None'" not in messages[0]
+
+
 # --- upgrade precedence -----------------------------------------------------
 
 
@@ -196,6 +208,40 @@ def test_upgrade_all_flag(make_config, fake_psql, fake_compose, fake_run) -> Non
     assert result["modules"] == ["all"]
 
 
+def test_upgrade_all_flag_respects_exclude(
+    make_config, fake_psql, fake_compose, fake_run, monkeypatch
+) -> None:
+    fake_psql.on("SELECT 1 FROM pg_database", returns="1\n")
+    monkeypatch.setattr("dbctl.commands.upgrade.installed_modules", lambda cfg, db: {"a", "b", "c"})
+    cfg = make_config('[modules]\nexclude = ["b"]\n')
+    result = upgrade.run(cfg, all_modules=True)
+    # "-u all" cannot itself skip a module, so exclude expands it into an
+    # explicit list instead of the literal "all".
+    assert result["modules"] == ["a", "c"]
+    assert result["excluded"] == ["b"]
+    assert any("-u" in c and "a,c" in c for c in fake_compose.calls)
+
+
+def test_upgrade_all_flag_with_exclude_needs_installed_table(
+    make_config, fake_psql, fake_compose, fake_run, monkeypatch
+) -> None:
+    fake_psql.on("SELECT 1 FROM pg_database", returns="1\n")
+    monkeypatch.setattr("dbctl.commands.upgrade.installed_modules", lambda cfg, db: None)
+    cfg = make_config('[modules]\nexclude = ["b"]\n')
+    with pytest.raises(ConfigError, match="ir_module_module"):
+        upgrade.run(cfg, all_modules=True)
+
+
+def test_upgrade_default_modules_respects_exclude(
+    make_config, fake_psql, fake_compose, fake_run
+) -> None:
+    fake_psql.on("SELECT 1 FROM pg_database", returns="1\n")
+    cfg = make_config('default_modules = ["a", "b"]\n[modules]\nexclude = ["b"]\n')
+    result = upgrade.run(cfg, detect=False)
+    assert result["modules"] == ["a"]
+    assert result["excluded"] == ["b"]
+
+
 def test_upgrade_detect_splits_install_new(
     make_config, fake_psql, fake_compose, fake_run, monkeypatch
 ) -> None:
@@ -207,6 +253,7 @@ def test_upgrade_detect_splits_install_new(
             "base_sha": "abc123",
             "modules": ["old", "fresh"],
             "changed_paths": ["addons/old/x.py", "addons/fresh/__manifest__.py"],
+            "excluded": [],
             "unmatched": [],
         },
     )
@@ -229,6 +276,7 @@ def test_upgrade_nothing_changed_falls_back_to_defaults(
             "base_sha": "abc",
             "modules": [],
             "changed_paths": [],
+            "excluded": [],
             "unmatched": [],
         },
     )
@@ -246,6 +294,7 @@ def test_upgrade_nothing_no_defaults_reports(make_config, fake_psql, fake_run, m
             "base_sha": "abc",
             "modules": [],
             "changed_paths": [],
+            "excluded": [],
             "unmatched": [],
         },
     )
@@ -281,6 +330,125 @@ def test_create_requires_template(make_config, fake_psql, fake_compose, fake_run
         create.run(make_config())
 
 
+def _fresh_config(tmp_path, *, odoo_extra: str = "", extra: str = "") -> Config:  # noqa: ANN001
+    """A valid config WITHOUT postgres.template_db (fresh-create mode)."""
+    from dbctl.config import load_config
+
+    cfg_path = tmp_path / ".dbctl.toml"
+    cfg_path.write_text(
+        '[postgres]\ncontainer="c"\nuser="u"\npassword="p"\n'
+        '[odoo]\ncontainer="o"\ncompose_service="web"\n' + odoo_extra + extra,
+        encoding="utf-8",
+    )
+    return load_config(tmp_path, cfg_path)
+
+
+def test_create_fresh_without_template(
+    make_config, fake_psql, fake_compose, tmp_path, fake_run, monkeypatch
+) -> None:
+    seeds = tmp_path / "temp" / "seeds"
+    seeds.mkdir(parents=True)
+    (seeds / "base.py").write_text("x", encoding="utf-8")
+    cfg = _fresh_config(
+        tmp_path,
+        odoo_extra='default_modules = ["proj_core"]\n',
+        extra='[seeds]\npath = "temp/seeds"\n',
+    )
+    fake_psql.default = ""
+    monkeypatch.setattr(
+        "dbctl.modules.detect",
+        lambda cfg: {
+            "base_ref": "origin/main",
+            "base_sha": "abc",
+            "modules": ["demo"],
+            "changed_paths": ["addons/demo/x.py"],
+            "excluded": [],
+            "unmatched": [],
+        },
+    )
+    sanitize_calls: list[str] = []
+    monkeypatch.setattr("dbctl.commands.create.sanitize", lambda c, db: sanitize_calls.append(db))
+    fake_compose.on("shell", returns="DBCTL_SEED_RAN:/mnt/dbctl-seeds/base.py\n")
+
+    result = create.run(cfg, use=True)
+
+    assert result["db"].startswith("dev_")
+    assert result["source"] is None  # fresh, no template
+    assert result["filestore"] == "none"  # nothing to copy
+    assert result["seeds"] and result["seeds"][0].endswith("base.py")
+    assert result["served"] == result["db"]
+    assert sanitize_calls == []  # nothing to sanitize on an empty database
+
+    # empty CREATE DATABASE, no TEMPLATE, no connection juggling
+    all_sql = " | ".join(c[-1] for c in fake_psql.calls)
+    assert 'CREATE DATABASE "dev_' in all_sql
+    assert "TEMPLATE" not in all_sql
+    assert "pg_terminate_backend" not in all_sql
+    # schema init installs base + defaults + detected module (-i, never -u)
+    schema_calls = [c for c in fake_compose.calls if "--stop-after-init" in c]
+    assert schema_calls, "fresh create must initialize the schema"
+    schema_args = " ".join(schema_calls[0])
+    assert "-i" in schema_args and "base,proj_core,demo" in schema_args
+    assert "-u" not in schema_args
+    # seeds run AFTER the schema init (they need Odoo tables)
+    schema_idx = next(i for i, c in enumerate(fake_compose.calls) if "--stop-after-init" in c)
+    seed_idx = next(i for i, c in enumerate(fake_compose.calls) if "shell" in c)
+    assert schema_idx < seed_idx
+    assert any("up" in c for c in fake_compose.calls), "final start missing"
+
+
+def test_create_fresh_from_override_clones(
+    make_config, fake_psql, fake_compose, tmp_path, fake_run, monkeypatch
+) -> None:
+    # No template in the config, but --from makes the clone optional: on.
+    cfg = _fresh_config(tmp_path)
+    fake_psql.default = ""
+    fake_psql.on("other_tpl", returns="1\n")
+    monkeypatch.setattr(
+        "dbctl.modules.detect",
+        lambda cfg: {
+            "base_ref": "origin/main",
+            "base_sha": "abc",
+            "modules": [],
+            "changed_paths": [],
+            "excluded": [],
+            "unmatched": [],
+        },
+    )
+    fake_compose.on("DBCTL_FILESTORE_MISSING", returns="DBCTL_FILESTORE_MISSING")
+
+    result = create.run(cfg, template="other_tpl")
+
+    assert result["source"] == "other_tpl"
+    assert result["filestore"] == "missing"
+    all_sql = " | ".join(c[-1] for c in fake_psql.calls)
+    assert 'CREATE DATABASE "dev_' in all_sql
+    assert 'TEMPLATE "other_tpl"' in all_sql
+    assert "pg_terminate_backend" in all_sql  # clone path terminates connections
+
+
+def test_create_fresh_detect_disabled_still_installs_base(
+    make_config, fake_psql, fake_compose, tmp_path, fake_run, monkeypatch
+) -> None:
+    cfg = _fresh_config(
+        tmp_path,
+        odoo_extra='default_modules = ["proj_core"]\n',
+        extra="[modules]\ndetect = false\n",
+    )
+    fake_psql.default = ""
+    sanitize_calls: list[str] = []
+    monkeypatch.setattr("dbctl.commands.create.sanitize", lambda c, db: sanitize_calls.append(db))
+
+    result = create.run(cfg)
+
+    assert result["upgrade"]["install"] == ["base", "proj_core"]
+    assert result["upgrade"]["base_sha"] is None
+    schema_calls = [c for c in fake_compose.calls if "--stop-after-init" in c]
+    assert schema_calls, "fresh create must initialize the schema even without detection"
+    assert "base,proj_core" in " ".join(schema_calls[0])
+    assert sanitize_calls == []
+
+
 def test_create_full_flow(
     make_config, fake_psql, fake_compose, tmp_path, fake_run, monkeypatch
 ) -> None:
@@ -294,6 +462,7 @@ def test_create_full_flow(
             "base_sha": "abc",
             "modules": [],
             "changed_paths": [],
+            "excluded": [],
             "unmatched": [],
         },
     )
@@ -312,7 +481,7 @@ def test_create_full_flow(
     assert result["seeds"] and result["seeds"][0].endswith("base.py")
     assert result["served"] == result["db"]
 
-    # phase order: stop -> terminate -> clone -> filestore -> sanitize -> seeds -> start
+    # phase order: stop -> terminate -> clone -> filestore -> sanitize -> schema -> seeds -> start
     all_sql = " | ".join(c[-1] for c in fake_psql.calls)
     stop_calls = [c for c in fake_compose.calls if "stop" in c]
     assert stop_calls, "strategy.stop must run first (clone needs zero connections)"
@@ -337,6 +506,7 @@ def test_create_no_use_restores_previous(
             "base_sha": "y",
             "modules": [],
             "changed_paths": [],
+            "excluded": [],
             "unmatched": [],
         },
     )
@@ -390,6 +560,7 @@ def test_create_upgrade_applies_schema(
             "base_sha": "abc",
             "modules": ["demo"],
             "changed_paths": ["addons/demo/x.py"],
+            "excluded": [],
             "unmatched": [],
         },
     )

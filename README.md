@@ -5,7 +5,8 @@
 Num projeto Odoo, todas as branches compartilham o mesmo banco Postgres. O Odoo
 aplica mudanças de schema com `-u`, mas **não reverte nada** no `git checkout`:
 o banco fica com o schema da última branch que subiu. `dbctl` resolve isso com
-um banco (e filestore) por branch, criado por clone de um banco template.
+um banco (e filestore) por branch — novo (vazio) por padrão, ou clonado de um
+banco template quando configurado.
 
 Trocar de branch passa a ser: `git checkout <branch>` + `dbctl use`.
 
@@ -57,14 +58,15 @@ pull, rode `uv sync` de novo.
 O projeto precisa: ser um repo git; rodar Postgres e Odoo em containers Docker
 com nomes estáveis; ter um `docker-compose.yml` com o serviço do Odoo (o
 `command` do serviço deve ser apenas `odoo` — o override do dbctl substitui o
-command ao trocar de banco, então flags extras seriam perdidas); e ter um banco
-template existente.
+command ao trocar de banco, então flags extras seriam perdidas). Um banco
+template é **opcional**: sem `template_db` no config, o `create` cria um banco
+novo (vazio) por branch.
 
 1. Copie o exemplo e preencha:
 
    ```bash
    cp .dbctl.example.toml <projeto>/.dbctl.toml
-   # edite: containers, credenciais, template_db, default_modules, seeds
+   # edite: containers, credenciais, template_db (opcional), default_modules, seeds
    ```
 
    O `.dbctl.toml` pode viver **na raiz do repositório** ou **em qualquer
@@ -104,7 +106,7 @@ Todas as chaves do `.dbctl.toml` aceitam override por env var no padrão
 
 ```bash
 git checkout -b GC-700-nova-feature
-dbctl create --use        # clona o template, copia filestore, sanitiza, roda seeds, serve
+dbctl create --use        # banco novo (vazio) ou clone do template; schema + seeds; serve
 # mexeu num model? aplique so no banco desta branch:
 dbctl upgrade     # detecta sozinho o que mudou desde a branch base
 # (ou explicite: dbctl upgrade -m faturamento)
@@ -114,7 +116,7 @@ git checkout GC-629-...   # o código troca (montado ao vivo no container)
 dbctl use                 # o Odoo passa a servir o banco da branch
 
 # banco sujou? recomece:
-dbctl reset               # dropa e recria a partir do template (confirmação)
+dbctl reset               # dropa e recria (do template, se configurado; senão, do zero)
 
 # limpeza:
 dbctl list                # bancos do prefixo com tamanho
@@ -124,8 +126,10 @@ dbctl unuse               # remove o override; o projeto volta à config base
 
 ## Detecção automática de módulos alterados
 
-O banco da branch nasceu de um clone do template, que reflete a branch base —
-então **o que a branch mudou desde a base é exatamente o que precisa de `-u`**.
+O banco da branch nasceu de um clone do template (que reflete a branch base) —
+ou, sem template, de uma criação vazia já inicializada com `base` +
+`default_modules` — então **o que a branch mudou desde a base é exatamente o
+que precisa de `-u`** (no clone) ou de `-i` (no banco novo).
 Sem `-m`, o `dbctl upgrade` descobre isso sozinho:
 
 1. base = `[modules].base_ref` → `origin/HEAD` → `main`/`master`/`develop`;
@@ -150,10 +154,32 @@ Configuração (`[modules]` no `.dbctl.toml`):
 | `manifest` | `__manifest__.py` | o que marca a raiz de um módulo |
 | `install_new` | `true` | módulo novo → `-i`; `false` → `-u` (no-op silencioso) |
 | `ignore` | `[]` | globs que nunca disparam upgrade (ex.: `["**/static/**"]`) |
+| `exclude` | `[]` | nomes de módulo que o dbctl nunca aplica sozinho |
 
 Casos de borda: na branch base, nada é detectado (cai em `default_modules`);
 clone shallow → erro explicando que falta histórico; arquivos fora de módulos
 (`docker-compose.yml`, README) são ignorados (visíveis com `--verbose`).
+
+### Excluindo módulos quebrados do resto do projeto
+
+Um módulo com bug pré-existente (xmlid duplicado, dependência ausente no
+manifest, etc.) trava `upgrade`/`create` mesmo quando não tem nada a ver com
+a branch atual, se ele também mudou ou entrar via `--all`/`default_modules`.
+`[modules].exclude` é o escape hatch: uma lista de nomes de módulo que o
+dbctl **nunca aplica sozinho** — nem por detecção, nem por `--all`, nem por
+`default_modules`. Módulos excluídos continuam aparecendo (em `status` e nas
+mensagens de `upgrade`/`create`) para deixar claro o que foi pulado e por
+quê; um `-m` explícito com o nome do módulo sempre ignora a exclusão.
+
+```toml
+[modules]
+exclude = ["modulo_quebrado"]
+```
+
+```bash
+dbctl upgrade    # detecta o que a branch mudou, exceto modulo_quebrado
+dbctl upgrade -m modulo_quebrado   # -m explícito sempre vence
+```
 
 ## Logs estruturados (JSONL)
 
@@ -239,7 +265,7 @@ manualmente; `install --force` faz backup como `post-checkout.bak` e sobrescreve
 | Comando | O que faz |
 |---|---|
 | `status` | Relatório somente-leitura: branch, banco alvo, servido, seed da branch |
-| `create [--from T] [--no-seed] [--use] [--no-upgrade]` | Clone do template + filestore + sanitize + seeds + **schema da branch** |
+| `create [--from T] [--no-seed] [--use] [--no-upgrade]` | Banco da branch: **novo** (vazio, com `-i base` + default_modules + módulos da branch) ou **clone** do template (filestore + sanitize) + seeds |
 | `use` | Aponta o serviço para o banco da branch (`-d` + `--db-filter` no override) |
 | `unuse` | Remove o `docker-compose.override.yaml` (reversível) |
 | `upgrade [-m mod1,mod2] [--all] [--no-detect]` | Aplica schema no banco da branch; sem `-m`, **detecta os módulos alterados** desde a branch base (`-i` para módulos novos) |
@@ -296,10 +322,11 @@ def run(env):
 
 ## Sanitize pós-clone
 
-Todo banco clonado passa por `odoo shell` que: gera um `database.uuid` novo e
-desativa todos os `ir.mail_server` (um banco de dev nunca deve enviar e-mail
-real). `ir.cron` **não** é desativado — decisão deliberada: testar crons é caso
-de uso legítimo de dev.
+Todo banco **clonado** de um template passa por `odoo shell` que: gera um
+`database.uuid` novo e desativa todos os `ir.mail_server` (um banco de dev
+nunca deve enviar e-mail real). `ir.cron` **não** é desativado — decisão
+deliberada: testar crons é caso de uso legítimo de dev. Banco criado **do zero**
+(sem template) não passa por sanitize — não há nada herdado para neutralizar.
 
 ## Segurança
 
@@ -313,7 +340,7 @@ de uso legítimo de dev.
 ## Resolução de problemas
 
 - **`database 'dev_x_...' already exists`** — o banco da branch já existe; rode
-  `dbctl reset` para recriar do template.
+  `dbctl reset` para recriar (do template, se configurado; senão, do zero).
 - **`database 'dev_x_...' does not exist`** — rode `dbctl create` primeiro.
 - **`refusing to drop ...`** — o nome não começa com o `db_prefix`; o tool não
   mexe em bancos que não criou.

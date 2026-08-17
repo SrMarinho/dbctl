@@ -9,6 +9,7 @@ from dbctl.postgres import (
     _ident,
     _lit,
     clone_database,
+    create_database,
     database_exists,
     drop_database,
     installed_modules,
@@ -72,6 +73,27 @@ def test_terminate_connections(fake_psql, make_config) -> None:
     sql = fake_psql.last()[-1]
     assert "pg_terminate_backend" in sql
     assert "datname = 'dev_x'" in sql
+
+
+def test_create_database_fresh(fake_psql, make_config) -> None:
+    fake_psql.default = ""
+    create_database(make_config(), "dev_x")
+    sql = fake_psql.last()[-1]
+    assert 'CREATE DATABASE "dev_x"' in sql
+    assert "TEMPLATE" not in sql
+
+
+def test_create_database_refuses_when_target_exists(fake_psql, make_config) -> None:
+    fake_psql.on("SELECT 1 FROM pg_database", returns="1\n")
+    with pytest.raises(DatabaseError, match="already exists"):
+        create_database(make_config(), "dev_x")
+
+
+def test_create_database_wraps_failure(fake_psql, make_config) -> None:
+    fake_psql.default = ""
+    fake_psql.fail_on("CREATE DATABASE", exit_code=1)
+    with pytest.raises(DatabaseError, match="failed to create database 'dev_x'"):
+        create_database(make_config(), "dev_x")
 
 
 def test_clone_database(fake_psql, make_config) -> None:

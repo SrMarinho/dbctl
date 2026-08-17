@@ -23,7 +23,9 @@ Para um projeto Odoo ser gerenciável pelo `dbctl`, ele precisa:
    do config, ver [configuração](04-configuracao.md)).
 2. Rodar Postgres e Odoo em containers Docker, com nomes de container estáveis.
 3. Ter um `docker-compose.yml` com um serviço de Odoo identificável.
-4. Ter um banco template já existente e funcional.
+4. Ter um banco template já existente e funcional — **opcional**: sem `postgres.template_db` no
+   `.dbctl.toml`, o `dbctl create` cria um banco novo (vazio) por branch, inicializado com `base` +
+   `default_modules` + módulos da branch. O template só é necessário quando se quer clonar.
 5. Ter um `.dbctl.toml` em algum lugar do repositório — não precisa ser a raiz (ver [configuração](04-configuracao.md)).
 
 ### 3.3 Ambiente de referência (projeto `credsus`) — fatos verificados

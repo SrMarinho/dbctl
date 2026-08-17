@@ -21,10 +21,10 @@ def run(cfg: Config, *, yes: bool = False, ask: Callable[[str], bool] | None = N
     if not yes:
         if ask is None:
             raise UserAbort("confirmation required (pass --yes to skip)")
-        if not ask(
-            f"reset database '{db}'? It will be dropped and recreated from "
-            f"'{cfg.postgres.template_db}'."
-        ):
+        source_desc = (
+            f"'{cfg.postgres.template_db}'" if cfg.postgres.template_db else "scratch (fresh)"
+        )
+        if not ask(f"reset database '{db}'? It will be dropped and recreated from {source_desc}."):
             raise UserAbort("aborted by user")
 
     if database_exists(cfg, db) or dry():

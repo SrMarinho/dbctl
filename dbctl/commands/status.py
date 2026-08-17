@@ -19,7 +19,7 @@ def _changed_preview(cfg: Config) -> dict:
     no-fail guarantee.
     """
     if not cfg.modules.detect:
-        return {"enabled": False, "modules": [], "base_ref": None, "base_sha": None}
+        return {"enabled": False, "modules": [], "excluded": [], "base_ref": None, "base_sha": None}
     try:
         from dbctl.modules import detect
 
@@ -27,6 +27,7 @@ def _changed_preview(cfg: Config) -> dict:
         return {
             "enabled": True,
             "modules": result["modules"],
+            "excluded": result["excluded"],
             "base_ref": result["base_ref"],
             "base_sha": result["base_sha"],
             "error": None,
@@ -35,6 +36,7 @@ def _changed_preview(cfg: Config) -> dict:
         return {
             "enabled": True,
             "modules": [],
+            "excluded": [],
             "base_ref": None,
             "base_sha": None,
             "error": str(exc),

@@ -35,8 +35,25 @@ def test_missing_required_keys(tmp_config) -> None:
     with pytest.raises(ConfigError) as exc:
         load_config(tmp_config, tmp_config / ".dbctl.toml")
     assert "[postgres].user" in str(exc.value)
-    assert "[postgres].template_db" in str(exc.value)
+    # template_db is OPTIONAL: without it, create makes fresh databases.
+    assert "[postgres].template_db" not in str(exc.value)
     assert "[postgres].password" in str(exc.value)
+
+
+def test_template_db_optional(tmp_config) -> None:
+    (tmp_config / ".dbctl.toml").write_text(
+        '[postgres]\ncontainer="c"\nuser="u"\npassword="p"\n'
+        '[odoo]\ncontainer="o"\ncompose_service="web"\n',
+        encoding="utf-8",
+    )
+    cfg = load_config(tmp_config, tmp_config / ".dbctl.toml")
+    assert cfg.postgres.template_db is None
+
+
+def test_template_db_env_override(tmp_config, monkeypatch) -> None:
+    monkeypatch.setenv("DBCTL_POSTGRES_TEMPLATE_DB", "env_tpl")
+    cfg = load_config(tmp_config, tmp_config / ".dbctl.toml")
+    assert cfg.postgres.template_db == "env_tpl"
 
 
 def test_missing_odoo_keys(tmp_config) -> None:
