@@ -56,6 +56,7 @@ mount = "/mnt/dbctl-seeds"               # opcional, default "/mnt/dbctl-seeds"
 auto         = false                     # opcional; true = gera registros p/ os models do repo
 auto_count   = 5                         # opcional; alvo de registros por model (idempotente)
 auto_exclude = []                        # opcional; models que o auto-seed nunca toca
+auto_deps    = false                     # opcional; gera dep. core vazia p/ many2one obrigatório
 
 [strategy]
 kind          = "compose-override"       # "compose-override" | "custom"

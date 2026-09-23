@@ -330,6 +330,7 @@ banco antes do `base.py` — não precisa escrever seed nenhum:
 auto         = true
 auto_count   = 5          # registros por model (só completa o que falta)
 auto_exclude = ["x.log"]  # models que nunca são gerados
+auto_deps    = false      # gera dep. core vazia p/ many2one obrigatório (ver abaixo)
 ```
 
 - Alvo: todo model concreto definido por um módulo **do repo** (pasta com
@@ -341,6 +342,12 @@ auto_exclude = ["x.log"]  # models que nunca são gerados
   registro, default que exige contexto de tela) é **pulado**, não quebra o
   resto — aparece como warning `autoseed_skip`. Cubra com um seed manual em
   `base.py` (roda depois, por cima) ou tire com `auto_exclude`.
+- `auto_deps = true`: se o many2one obrigatório sem registro aponta pra um
+  model core/terceiro (fora do repo) e a tabela dele está vazia, gera esse
+  comodel também, em vez de só pular. Nunca mexe em `ir.*`, `res.users`,
+  `res.groups`, `res.company` nem em tabela que já tem dado — evita repetir
+  o incidente em que popular `res.users.role.line` disparou um hook que
+  sobrescreveu os grupos do admin.
 - `--no-seed` desliga tudo, inclusive o auto-seed.
 
 ## Sanitize pós-clone

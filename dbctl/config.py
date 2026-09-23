@@ -47,6 +47,7 @@ class SeedsConfig:
     auto: bool = False  # generate records for the repo's models before the seed files
     auto_count: int = 5  # target records per model (idempotent: only the missing ones)
     auto_exclude: list[str] = field(default_factory=list)  # models never generated
+    auto_deps: bool = False  # also generate empty core deps of required many2one fields
 
 
 @dataclass
@@ -252,6 +253,16 @@ def load_config(project_root: Path, config_path: Path) -> Config:
     if auto_exclude is None:
         raw_auto_exclude = sd_raw.get("auto_exclude", [])
         auto_exclude = list(raw_auto_exclude) if isinstance(raw_auto_exclude, list) else []
+    auto_deps_env = _env("seeds", "auto_deps")
+    if auto_deps_env is not None:
+        auto_deps = _parse_bool(auto_deps_env, "DBCTL_SEEDS_AUTO_DEPS")
+    else:
+        auto_deps = sd_raw.get("auto_deps", False)
+        if not isinstance(auto_deps, bool):
+            raise ConfigError(
+                f"invalid [seeds].auto_deps in {cfg_path}: "
+                f"expected a TOML boolean, got {auto_deps!r}"
+            )
 
     # --- [strategy] ------------------------------------------------------
     st_raw = data.get("strategy", {})
@@ -362,6 +373,7 @@ def load_config(project_root: Path, config_path: Path) -> Config:
             auto=auto,
             auto_count=auto_count,
             auto_exclude=auto_exclude,
+            auto_deps=auto_deps,
         ),
         strategy=StrategyConfig(
             kind=kind,

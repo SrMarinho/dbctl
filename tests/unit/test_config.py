@@ -223,3 +223,18 @@ def test_seeds_auto_env_override_and_bad_count(make_config, monkeypatch) -> None
     assert cfg.seeds.auto is True and cfg.seeds.auto_exclude == ["a.b", "c.d"]
     with pytest.raises(ConfigError, match="auto_count"):
         make_config("[seeds]\nauto_count = 0\n")
+
+
+def test_seeds_auto_deps_default_env_and_bad_toml(make_config, monkeypatch) -> None:
+    cfg = make_config()
+    assert cfg.seeds.auto_deps is False
+
+    monkeypatch.setenv("DBCTL_SEEDS_AUTO_DEPS", "yes")
+    assert make_config().seeds.auto_deps is True
+    monkeypatch.delenv("DBCTL_SEEDS_AUTO_DEPS")
+
+    cfg = make_config("[seeds]\nauto_deps = true\n")
+    assert cfg.seeds.auto_deps is True
+
+    with pytest.raises(ConfigError, match="auto_deps"):
+        make_config('[seeds]\nauto_deps = "x"\n')
