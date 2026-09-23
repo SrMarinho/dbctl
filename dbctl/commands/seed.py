@@ -15,7 +15,7 @@ def run(cfg: Config) -> dict:
         raise DatabaseError(
             f"database '{db}' does not exist - run 'dbctl create' first (branch '{branch}')."
         )
-    if cfg.seeds.path is None or not cfg.seeds.path.is_dir():
+    if not cfg.seeds.auto and (cfg.seeds.path is None or not cfg.seeds.path.is_dir()):
         return {"skipped": True}
     ran = run_seeds(cfg, db, branch)
     return {"ran": ran}

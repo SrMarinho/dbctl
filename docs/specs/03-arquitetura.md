@@ -47,6 +47,7 @@ casca fina: faz parsing de argumentos e formata saída, **nunca contém regra de
     filestore.py           # operações de filestore
     sanitize.py            # neutralização pós-clone
     seeding.py             # execução dos seeds
+    autoseed_shell.py      # gerador do auto-seed (roda dentro do odoo shell)
     strategies/
       __init__.py          # seleção da estratégia
       base.py              # interface (ABC)

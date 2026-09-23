@@ -111,3 +111,29 @@ def test_filestore_remove_builds_rm(make_config, fake_compose) -> None:
     filestore_remove(make_config(), "dev_x")
     joined = " ".join(fake_compose.last())
     assert 'rm -rf "/var/lib/odoo/filestore/dev_x"' in joined
+
+
+def test_run_seeds_auto_without_dir(make_config, tmp_path, fake_compose) -> None:
+    (tmp_path / "addons" / "demo").mkdir(parents=True)
+    (tmp_path / "addons" / "demo" / "__manifest__.py").write_text("{}", encoding="utf-8")
+    (tmp_path / ".venv" / "junk").mkdir(parents=True)
+    (tmp_path / ".venv" / "junk" / "__manifest__.py").write_text("{}", encoding="utf-8")
+    cfg = make_config("[seeds]\nauto = true\nauto_count = 3\n")
+    fake_compose.default = (
+        "DBCTL_AUTOSEED:demo.item:3\nDBCTL_AUTOSEED_SKIP:demo.bad:ValidationError\n"
+    )
+    ran = run_seeds(cfg, "dev_x", "feature-x")
+    assert ran == ["auto:demo.item(3)"]
+    code = fake_compose.inputs[-1]
+    assert code is not None
+    assert "run_auto(env, ['demo'], 3, [])" in code  # .venv pruned
+    assert "base.py" not in code  # no seeds dir -> no file bootstrap
+    assert "-v" not in fake_compose.last()
+    compile(code, "<bootstrap>", "exec")  # generator + call is valid Python
+
+
+def test_run_seeds_auto_disabled_by_default(make_config, fake_compose) -> None:
+    cfg = make_config()
+    assert cfg.seeds.auto is False and cfg.seeds.auto_count == 5
+    assert run_seeds(cfg, "dev_x", "feature") == []
+    assert not fake_compose.calls

@@ -44,6 +44,9 @@ class SeedsConfig:
     path: Path | None = None  # absolute; None when not configured
     mount: str = "/mnt/dbctl-seeds"
     configured: bool = False  # True when [seeds] or env override exists
+    auto: bool = False  # generate records for the repo's models before the seed files
+    auto_count: int = 5  # target records per model (idempotent: only the missing ones)
+    auto_exclude: list[str] = field(default_factory=list)  # models never generated
 
 
 @dataclass
@@ -212,7 +215,7 @@ def load_config(project_root: Path, config_path: Path) -> Config:
     # --- [seeds] ---------------------------------------------------------
     sd_raw = data.get("seeds", {})
     seeds_configured = bool(sd_raw) or any(
-        os.environ.get(k) for k in ("DBCTL_SEEDS_PATH", "DBCTL_SEEDS_MOUNT")
+        os.environ.get(k) for k in ("DBCTL_SEEDS_PATH", "DBCTL_SEEDS_MOUNT", "DBCTL_SEEDS_AUTO")
     )
     seeds_path_raw = _env("seeds", "path")
     if seeds_path_raw is None and sd_raw.get("path") is not None:
@@ -227,6 +230,28 @@ def load_config(project_root: Path, config_path: Path) -> Config:
                 f"seeds.path '{seeds_path}' does not exist - 'dbctl seed' will be a no-op"
             )
     mount = _env("seeds", "mount") or str(sd_raw.get("mount", "/mnt/dbctl-seeds"))
+    auto_env = _env("seeds", "auto")
+    if auto_env is not None:
+        auto = _parse_bool(auto_env, "DBCTL_SEEDS_AUTO")
+    else:
+        auto = sd_raw.get("auto", False)
+        if not isinstance(auto, bool):
+            raise ConfigError(
+                f"invalid [seeds].auto in {cfg_path}: expected a TOML boolean, got {auto!r}"
+            )
+    count_raw = _env("seeds", "auto_count") or sd_raw.get("auto_count", 5)
+    try:
+        auto_count = int(count_raw)
+    except (TypeError, ValueError):
+        auto_count = 0
+    if auto_count < 1:
+        raise ConfigError(
+            f"invalid [seeds].auto_count in {cfg_path}: expected an integer >= 1, got {count_raw!r}"
+        )
+    auto_exclude = _split_list(_env("seeds", "auto_exclude"))
+    if auto_exclude is None:
+        raw_auto_exclude = sd_raw.get("auto_exclude", [])
+        auto_exclude = list(raw_auto_exclude) if isinstance(raw_auto_exclude, list) else []
 
     # --- [strategy] ------------------------------------------------------
     st_raw = data.get("strategy", {})
@@ -330,7 +355,14 @@ def load_config(project_root: Path, config_path: Path) -> Config:
             data_dir=data_dir,
             default_modules=default_modules,
         ),
-        seeds=SeedsConfig(path=seeds_path, mount=mount, configured=seeds_configured),
+        seeds=SeedsConfig(
+            path=seeds_path,
+            mount=mount,
+            configured=seeds_configured,
+            auto=auto,
+            auto_count=auto_count,
+            auto_exclude=auto_exclude,
+        ),
         strategy=StrategyConfig(
             kind=kind,
             override_file=override_file,

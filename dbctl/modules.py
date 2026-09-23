@@ -9,11 +9,12 @@ __manifest__.py), found by walking up from each changed file.
 
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 
 from dbctl.config import Config
-from dbctl.project import changed_paths, default_base_ref, merge_base
+from dbctl.project import _prune, changed_paths, default_base_ref, merge_base
 
 
 def _glob_to_regex(pattern: str) -> re.Pattern[str]:
@@ -105,3 +106,20 @@ def detect(cfg: Config) -> dict:
         "changed_paths": paths,
         "unmatched": unmatched,
     }
+
+
+def repo_modules(cfg: Config) -> list[str]:
+    """Every module living in the repository (a directory holding the manifest).
+
+    Pruned like the config discovery (.git, .venv, node_modules, dotdirs);
+    [modules].exclude is honored.
+    """
+    exclude = set(cfg.modules.exclude)
+    found: set[str] = set()
+    for dirpath, dirnames, filenames in os.walk(cfg.project_root):
+        dirnames[:] = [d for d in dirnames if not _prune(d)]
+        if cfg.modules.manifest in filenames:
+            name = Path(dirpath).name
+            if name not in exclude:
+                found.add(name)
+    return sorted(found)

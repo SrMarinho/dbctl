@@ -53,6 +53,9 @@ default_modules = ["faturamento"]         # opcional, usado pelo `upgrade` sem -
 [seeds]
 path  = "temp/seeds"                     # opcional; se ausente, comando `seed` é no-op avisando
 mount = "/mnt/dbctl-seeds"               # opcional, default "/mnt/dbctl-seeds"
+auto         = false                     # opcional; true = gera registros p/ os models do repo
+auto_count   = 5                         # opcional; alvo de registros por model (idempotente)
+auto_exclude = []                        # opcional; models que o auto-seed nunca toca
 
 [strategy]
 kind          = "compose-override"       # "compose-override" | "custom"

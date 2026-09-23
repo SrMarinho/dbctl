@@ -214,3 +214,12 @@ def test_compose_files_includes_existing_override(tmp_config) -> None:
     (tmp_config / "docker-compose.override.yaml").write_text("x\n", encoding="utf-8")
     cfg = load_config(tmp_config, tmp_config / ".dbctl.toml")
     assert cfg.compose_files == ["docker-compose.yml", "docker-compose.override.yaml"]
+
+
+def test_seeds_auto_env_override_and_bad_count(make_config, monkeypatch) -> None:
+    monkeypatch.setenv("DBCTL_SEEDS_AUTO", "yes")
+    monkeypatch.setenv("DBCTL_SEEDS_AUTO_EXCLUDE", "a.b, c.d")
+    cfg = make_config()
+    assert cfg.seeds.auto is True and cfg.seeds.auto_exclude == ["a.b", "c.d"]
+    with pytest.raises(ConfigError, match="auto_count"):
+        make_config("[seeds]\nauto_count = 0\n")

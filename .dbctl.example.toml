@@ -36,6 +36,11 @@ default_modules = ["my_module"]         # optional; used by `upgrade` without -m
 [seeds]
 path  = "temp/seeds"                    # optional; if absent, `seed` is a no-op with a notice
 mount = "/mnt/dbctl-seeds"              # optional, default "/mnt/dbctl-seeds"
+# auto         = true                   # optional, default false: before the seed
+                                        # files, generate records for every model
+                                        # of the repo's modules (works without path)
+# auto_count   = 5                      # optional; target records per model
+# auto_exclude = ["my.model"]           # optional; models never generated
 
 [strategy]
 kind          = "compose-override"      # "compose-override" | "custom"

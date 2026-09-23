@@ -320,6 +320,29 @@ def run(env):
 - A pasta é montada no container efêmero via `-v` explícito — não depende do
   override do compose.
 
+### Auto-seed (popular a partir dos models)
+
+Com `auto = true` em `[seeds]`, todo `create`/`reset`/`seed` popula sozinho o
+banco antes do `base.py` — não precisa escrever seed nenhum:
+
+```toml
+[seeds]
+auto         = true
+auto_count   = 5          # registros por model (só completa o que falta)
+auto_exclude = ["x.log"]  # models que nunca são gerados
+```
+
+- Alvo: todo model concreto definido por um módulo **do repo** (pasta com
+  manifesto; respeita `[modules].exclude`).
+- Valores triviais por tipo (`"Nome 3"`, `3`, hoje+3d, 1ª opção do selection,
+  many2one → registro existente, gerando o comodel antes quando ele também é do repo).
+- Idempotente: um model que já tem `auto_count` registros é pulado.
+- Model que o Odoo rejeita (regra de negócio, many2one obrigatório sem
+  registro, default que exige contexto de tela) é **pulado**, não quebra o
+  resto — aparece como warning `autoseed_skip`. Cubra com um seed manual em
+  `base.py` (roda depois, por cima) ou tire com `auto_exclude`.
+- `--no-seed` desliga tudo, inclusive o auto-seed.
+
 ## Sanitize pós-clone
 
 Todo banco **clonado** de um template passa por `odoo shell` que: gera um

@@ -143,6 +143,15 @@ Roda logo após o clone, via `seeding.run_python(...)` (mesmo canal de `odoo she
      `run(env)`;
   2. se `<mount>/branches/<slug>.py` existir, carrega e chama `run(env)` também;
   3. `env.cr.commit()`.
+- **Auto-seed** (`[seeds].auto = true`): antes dos arquivos, o bootstrap recebe o texto de
+  `autoseed_shell.py` + `run_auto(env, <módulos do repo>, auto_count, auto_exclude)`. Os módulos vêm
+  de `modules.repo_modules(cfg)` (toda pasta com manifesto, podando `.git`/`.venv`/dotdirs, menos
+  `[modules].exclude`). Para cada model concreto cujo `_original_module` é do repo, completa a tabela
+  até `auto_count` registros com valores triviais por tipo (char → `"<label> <i>"`, int, float, data,
+  1ª opção de selection, many2one → registro existente, gerando o comodel antes se ele também for
+  alvo). Cada model roda num savepoint: constraint que rejeita os valores só pula aquele model
+  (`DBCTL_AUTOSEED_SKIP`, logado como warning). Funciona sem pasta de seeds (sem `-v`).
+  `autoseed_shell.py` roda **dentro** do Odoo e nunca é importado pelo host.
 
 **Contrato dos seeds — crítico para o agnosticismo:**
 - A pasta de seeds contém **arquivos soltos**, sem `__init__.py`, sem instalação de pacote.
