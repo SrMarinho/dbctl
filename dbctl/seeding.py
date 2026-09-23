@@ -59,7 +59,7 @@ def _auto_code(cfg: Config) -> str:
 
     call = (
         f"run_auto(env, {repo_modules(cfg)!r}, {cfg.seeds.auto_count!r}, "
-        f"{cfg.seeds.auto_exclude!r})\n"
+        f"{cfg.seeds.auto_exclude!r}, {cfg.seeds.auto_deps!r})\n"
     )
     return _AUTOSEED_SRC.read_text(encoding="utf-8") + "\n" + call
 

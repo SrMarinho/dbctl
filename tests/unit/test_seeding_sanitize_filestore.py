@@ -126,7 +126,7 @@ def test_run_seeds_auto_without_dir(make_config, tmp_path, fake_compose) -> None
     assert ran == ["auto:demo.item(3)"]
     code = fake_compose.inputs[-1]
     assert code is not None
-    assert "run_auto(env, ['demo'], 3, [])" in code  # .venv pruned
+    assert "run_auto(env, ['demo'], 3, [], False)" in code  # .venv pruned
     assert "base.py" not in code  # no seeds dir -> no file bootstrap
     assert "-v" not in fake_compose.last()
     compile(code, "<bootstrap>", "exec")  # generator + call is valid Python

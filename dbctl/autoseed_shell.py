@@ -7,6 +7,10 @@ For every concrete model defined by one of the repo's modules it tops the
 table up to ``count`` records, filling each writable field with a trivial
 value derived from its type. Each model runs in its own savepoint: a
 constraint that rejects the fake values skips only that model.
+
+With ``[seeds].auto_deps = true``, a required many2one pointing at a core
+model that isn't a repo target and is still empty also gets generated (see
+``_dep_ok``) so the repo model doesn't skip on a missing dependency.
 """
 
 import datetime
@@ -28,6 +32,11 @@ _SKIP_TYPES = {
     "many2one_reference",
 }
 
+# Never auto-created as a dependency, even with auto_deps=true: shared
+# identity/config models with cascading hooks (see res.users.role.line
+# incident) that in a real DB are never actually empty.
+_DEPS_DENYLIST_PREFIXES = ("ir.", "res.users", "res.groups", "res.company")
+
 
 def _value(env: Any, field: Any, i: int, pick: Any) -> Any:
     kind = field.type
@@ -47,11 +56,13 @@ def _value(env: Any, field: Any, i: int, pick: Any) -> Any:
         options = field.get_values(env)
         return options[i % len(options)] if options else None
     if kind == "many2one":
-        return pick(field.comodel_name, i)
+        return pick(field.comodel_name, i, field.required)
     return None
 
 
-def run_auto(env: Any, modules: list[str], count: int, exclude: list[str]) -> None:
+def run_auto(
+    env: Any, modules: list[str], count: int, exclude: list[str], deps: bool = False
+) -> None:
     env = env(
         context=dict(env.context, tracking_disable=True, mail_create_nolog=True, mail_notrack=True)
     )
@@ -71,8 +82,24 @@ def run_auto(env: Any, modules: list[str], count: int, exclude: list[str]) -> No
     done: set[str] = set()
     visiting: set[str] = set()
 
-    def pick(comodel: str, i: int) -> int | None:
-        if comodel in targets:
+    def _dep_ok(comodel: str) -> bool:
+        model = env[comodel]
+        return (
+            comodel not in exclude
+            and not comodel.startswith(_DEPS_DENYLIST_PREFIXES)
+            and not model._abstract
+            and not model._transient
+            and model._auto
+        )
+
+    def pick(comodel: str, i: int, required: bool) -> int | None:
+        if comodel in targets or (
+            deps
+            and required
+            and comodel not in done
+            and _dep_ok(comodel)
+            and env[comodel].search_count([]) == 0
+        ):
             seed(comodel)
         records = env[comodel].search([], limit=count)
         return records[i % len(records)].id if records else None
